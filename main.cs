@@ -101,6 +101,10 @@ class Program
     private static bool rightWinPressed;
     private static IntPtr activeWindow;
 
+    private static bool _isWaitingForNumpad;
+    private static long _lastPauseTick;
+    private static Keys _suppressNextKeyUp = Keys.None;
+
     private static LowLevelKeyboardProc _proc = HookCallback;
     private static LowLevelMouseProc _mouseProc = MouseHookCallback;
 
@@ -238,6 +242,60 @@ class Program
             bool isHotkeyPressed = IsHotkeyPressed();
             bool isResizeHotkeyPressed = IsResizeHotkeyPressed();
 
+            // 直前に消費したキーの KeyUp を抑制
+            if (isKeyUp && _suppressNextKeyUp != Keys.None && (Keys)vkCode == _suppressNextKeyUp)
+            {
+                _suppressNextKeyUp = Keys.None;
+                return (IntPtr)1;
+            }
+
+            // Pause キーの処理（NumPad待ちのトグル・キャンセル）
+            if ((Keys)vkCode == Keys.Pause)
+            {
+                if (isKeyDown && _resizePhase == ResizePhase.None)
+                {
+                    long now = Stopwatch.GetTimestamp();
+                    if (_lastPauseTick == 0 || Stopwatch.GetElapsedTime(_lastPauseTick, now).TotalMilliseconds >= 150)
+                    {
+                        _lastPauseTick = now;
+                        if (_isWaitingForNumpad)
+                        {
+                            CancelNumpadWaiting();
+                        }
+                        else
+                        {
+                            StartNumpadWaiting();
+                        }
+                    }
+                }
+                return (IntPtr)1;
+            }
+
+            // NumPad 待ち受け中のキー処理
+            if (_isWaitingForNumpad)
+            {
+                if ((Keys)vkCode == Keys.Escape)
+                {
+                    if (isKeyDown)
+                    {
+                        CancelNumpadWaiting();
+                        _suppressNextKeyUp = Keys.Escape;
+                    }
+                    return (IntPtr)1;
+                }
+
+                if (TryGetNumpadKey(vkCode, lParam, out Keys pauseNumpadKey))
+                {
+                    if (isKeyDown)
+                    {
+                        MoveCursorToWindowPosition(pauseNumpadKey);
+                        CancelNumpadWaiting();
+                        _suppressNextKeyUp = (Keys)vkCode;
+                    }
+                    return (IntPtr)1;
+                }
+            }
+
             // Clip cursor hotkey (Ctrl+Alt)
             if (!wasHotkeyPressed && isHotkeyPressed && GetCursorPos(out POINT cursorPosition))
             {
@@ -247,8 +305,11 @@ class Program
             }
             else if (wasHotkeyPressed && !isHotkeyPressed)
             {
-                ClipCursor(IntPtr.Zero);
-                activeWindow = IntPtr.Zero;
+                if (!_isWaitingForNumpad)
+                {
+                    ClipCursor(IntPtr.Zero);
+                    activeWindow = IntPtr.Zero;
+                }
             }
 
             if (isKeyDown && isHotkeyPressed
@@ -300,6 +361,9 @@ class Program
     {
         // 既にリサイズモード中なら無視
         if (_resizePhase != ResizePhase.None) return;
+
+        if (_isWaitingForNumpad)
+            CancelNumpadWaiting();
 
         IntPtr fgWnd = GetForegroundWindow();
         if (fgWnd == IntPtr.Zero) return;
@@ -446,9 +510,36 @@ class Program
 
     // メインロジック -------------------------------------------------------
 
+    private static void StartNumpadWaiting()
+    {
+        _isWaitingForNumpad = true;
+        if (GetCursorPos(out POINT cursorPosition))
+        {
+            IntPtr window = WindowFromPoint(cursorPosition);
+            activeWindow = window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, GA_ROOT);
+            if (activeWindow == IntPtr.Zero)
+            {
+                IntPtr fg = GetForegroundWindow();
+                if (fg != IntPtr.Zero)
+                    activeWindow = GetAncestor(fg, GA_ROOT);
+            }
+            ClipActiveWindow();
+        }
+    }
+
+    private static void CancelNumpadWaiting()
+    {
+        _isWaitingForNumpad = false;
+        if (!IsHotkeyPressed())
+        {
+            ClipCursor(IntPtr.Zero);
+            activeWindow = IntPtr.Zero;
+        }
+    }
+
     private static void Timer_Tick(object? sender, EventArgs e)
     {
-        if (IsHotkeyPressed())
+        if (IsHotkeyPressed() || _isWaitingForNumpad)
             ClipActiveWindow();
     }
 
@@ -460,6 +551,7 @@ class Program
         {
             ClipCursor(IntPtr.Zero);
             activeWindow = IntPtr.Zero;
+            _isWaitingForNumpad = false;
             return;
         }
 

@@ -5,11 +5,17 @@
 | Key | Description |
 | --- | ----------- |
 | Ctrl + Alt + Win + Numpad1..9 | move mouse pointer (window 9-positions) |
+| Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
 | Alt + Win + F11 | resize active window. |
 
 ### move-mouse-pointer 
 
-`Ctrl + Alt + Win` を押下している間、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
+`Ctrl + Alt + Win` を押下している間、または `Pause` キーを押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
+
+- **Pauseキー方式（モーダル入力）**:
+  - `Pause` キーを押すとテンキー待ち状態に入り、カーソルが対象ウィンドウ内に固定されます。
+  - 続けて `NumPad 1〜9` を押すと該当位置へカーソルが移動し、待ち状態が終了します。
+  - 待ち状態中にもう一度 `Pause` キー（または `Esc` キー）を押すと、移動を行わずにテンキー待ちをキャンセルします。
 
 #### テンキー配置と移動位置の対応
 
