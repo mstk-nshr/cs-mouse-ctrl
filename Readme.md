@@ -7,6 +7,8 @@
 | Ctrl + Alt + Win + Numpad1..9 | move mouse pointer (window 9-positions) |
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
 | Alt + Win + F11 | resize active window. |
+| Shift + Mouse Move | move mouse pointer at 2× speed |
+| Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
 ### move-mouse-pointer 
 
@@ -44,6 +46,22 @@
 > [!NOTE]
 > - **カーソルクリップ機能**: `Ctrl + Alt` を押している間はマウスカーソルの移動可能範囲が対象ウィンドウ内に制限（`ClipCursor`）されます。キーを離すと自動的に制限が解除されます。
 > - **マージン**: 各隅の座標はウィンドウ境界の外に出てしまわないよう、境界から内側へ 10px のオフセットが自動適用されます。
+
+
+### 高速マウス移動
+
+`Shift` または `Ctrl` キーを押しながらマウスを動かすと、移動量が増幅されマウスポインターが高速に移動します。
+
+| キー | 倍率 | 説明 |
+| :--- | :---: | :--- |
+| **Shift** + マウス移動 | **2倍** | 通常の移動量を 2 倍に増幅 |
+| **Ctrl** + マウス移動 | **5倍** | 通常の移動量を 5 倍に増幅 |
+| **Ctrl + Shift** + マウス移動 | **5倍** | Ctrl が優先される |
+
+> [!NOTE]
+> - `Ctrl + Alt` の組み合わせは既存の **カーソルクリップ機能** に割り当てられているため、高速移動は適用されません。
+> - 高速移動中に画面端を超えようとした場合は、仮想スクリーンの端にクランプされます。
+> - キーを離すと即座に通常速度に戻ります。
 
 
 ### Resize-Active-Window 動作フロー

@@ -99,7 +99,13 @@ class Program
     private static bool rightAltPressed;
     private static bool leftWinPressed;
     private static bool rightWinPressed;
+    private static bool leftShiftPressed;
+    private static bool rightShiftPressed;
     private static IntPtr activeWindow;
+
+    // 高速移動: 直前のマウス座標（増幅計算用）
+    private static POINT _lastMousePt;
+    private static bool _lastMousePtValid = false;
 
     private static bool _isWaitingForNumpad;
     private static long _lastPauseTick;
@@ -133,6 +139,7 @@ class Program
             mutex.WaitOne();
 
         _hookID = SetHook(_proc);
+        _mouseHookID = SetMouseHook(_mouseProc);
 
         // 10ms タイマーでカーソル監視
         System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
@@ -220,9 +227,11 @@ class Program
                 {
                     case Keys.LControlKey:
                         leftCtrlPressed = pressed;
+                        if (!pressed) _lastMousePtValid = false;
                         break;
                     case Keys.RControlKey:
                         rightCtrlPressed = pressed;
+                        if (!pressed) _lastMousePtValid = false;
                         break;
                     case Keys.LMenu:
                         leftAltPressed = pressed;
@@ -235,6 +244,14 @@ class Program
                         break;
                     case Keys.RWin:
                         rightWinPressed = pressed;
+                        break;
+                    case Keys.LShiftKey:
+                        leftShiftPressed = pressed;
+                        if (!pressed) _lastMousePtValid = false;
+                        break;
+                    case Keys.RShiftKey:
+                        rightShiftPressed = pressed;
+                        if (!pressed) _lastMousePtValid = false;
                         break;
                 }
             }
@@ -271,7 +288,7 @@ class Program
                 return (IntPtr)1;
             }
 
-            // NumPad 待ち受け中のキー処理
+            // NumPad 待ち受中のキー処理
             if (_isWaitingForNumpad)
             {
                 if ((Keys)vkCode == Keys.Escape)
@@ -392,20 +409,14 @@ class Program
         // マウスをBOX左上へ移動
         SetCursorPos(_resizeTopLeft.X, _resizeTopLeft.Y);
 
-        // マウスフック開始
-        if (_mouseHookID == IntPtr.Zero)
-            _mouseHookID = SetMouseHook(_mouseProc);
+        // マウスフック: 常時フック済みなので追加登録不要
     }
 
     private static void CancelResizeMode()
     {
         _resizePhase = ResizePhase.None;
         _resizeTarget = IntPtr.Zero;
-        if (_mouseHookID != IntPtr.Zero)
-        {
-            UnhookWindowsHookEx(_mouseHookID);
-            _mouseHookID = IntPtr.Zero;
-        }
+        // マウスフックは常時維持するので解除しない
         CloseOverlay();
     }
 
@@ -423,55 +434,106 @@ class Program
 
     private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && _resizePhase != ResizePhase.None)
+        if (nCode >= 0)
         {
             MSLLHOOKSTRUCT ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
             int msg = wParam.ToInt32();
 
             if (msg == WM_MOUSEMOVE)
             {
-                // ボックスをダイナミック再描画
-                if (_resizePhase == ResizePhase.TopLeft)
+                // --- 高速移動 (Resize Mode 外のみ) ---
+                if (_resizePhase == ResizePhase.None)
                 {
-                    _resizeTopLeft = ms.pt;
-                    UpdateOverlay();
+                    bool shiftDown = leftShiftPressed || rightShiftPressed;
+                    bool ctrlDown  = leftCtrlPressed  || rightCtrlPressed;
+
+                    // Ctrl+Alt は ClipCursor ホットキーなので高速移動は除外
+                    bool altDown = leftAltPressed || rightAltPressed;
+
+                    if ((shiftDown || ctrlDown) && !altDown)
+                    {
+                        int multiplier = ctrlDown ? 5 : 2;
+
+                        if (_lastMousePtValid)
+                        {
+                            int dx = ms.pt.X - _lastMousePt.X;
+                            int dy = ms.pt.Y - _lastMousePt.Y;
+
+                            if (dx != 0 || dy != 0)
+                            {
+                                int newX = ms.pt.X + dx * (multiplier - 1);
+                                int newY = ms.pt.Y + dy * (multiplier - 1);
+
+                                // 仮想スクリーン範囲にクランプ
+                                newX = Math.Clamp(newX,
+                                    SystemInformation.VirtualScreen.Left,
+                                    SystemInformation.VirtualScreen.Right - 1);
+                                newY = Math.Clamp(newY,
+                                    SystemInformation.VirtualScreen.Top,
+                                    SystemInformation.VirtualScreen.Bottom - 1);
+
+                                _lastMousePt = new POINT { X = newX, Y = newY };
+                                SetCursorPos(newX, newY);
+                                return (IntPtr)1; // 元のイベントを抑制
+                            }
+                        }
+
+                        _lastMousePt = ms.pt;
+                        _lastMousePtValid = true;
+                        return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
+                    }
+                    else
+                    {
+                        _lastMousePtValid = false;
+                    }
                 }
-                else if (_resizePhase == ResizePhase.BottomRight)
+
+                // --- Window Resize Mode ---
+                if (_resizePhase != ResizePhase.None)
                 {
-                    _resizeBottomRight = ms.pt;
-                    UpdateOverlay();
+                    if (_resizePhase == ResizePhase.TopLeft)
+                    {
+                        _resizeTopLeft = ms.pt;
+                        UpdateOverlay();
+                    }
+                    else if (_resizePhase == ResizePhase.BottomRight)
+                    {
+                        _resizeBottomRight = ms.pt;
+                        UpdateOverlay();
+                    }
                 }
             }
-            else if (msg == WM_LBUTTONDOWN)
+            else if (_resizePhase != ResizePhase.None)
             {
-                if (_resizePhase == ResizePhase.TopLeft)
+                if (msg == WM_LBUTTONDOWN)
                 {
-                    // 左上座標確定 → マウスをBOX右下へ移動
-                    _resizeTopLeft = ms.pt;
-                    _resizePhase = ResizePhase.BottomRight;
-                    SetCursorPos(_resizeBottomRight.X, _resizeBottomRight.Y);
-                    UpdateOverlay();
-                    // このクリックは通過させない
-                    return (IntPtr)1;
+                    if (_resizePhase == ResizePhase.TopLeft)
+                    {
+                        // 左上座標確定 → マウスをBOX右下へ移動
+                        _resizeTopLeft = ms.pt;
+                        _resizePhase = ResizePhase.BottomRight;
+                        SetCursorPos(_resizeBottomRight.X, _resizeBottomRight.Y);
+                        UpdateOverlay();
+                        return (IntPtr)1;
+                    }
+                    else if (_resizePhase == ResizePhase.BottomRight)
+                    {
+                        // 右下座標確定 → ウィンドウをリサイズ
+                        _resizeBottomRight = ms.pt;
+                        ApplyResize();
+                        CancelResizeMode();
+                        return (IntPtr)1;
+                    }
                 }
-                else if (_resizePhase == ResizePhase.BottomRight)
+                else if (msg == WM_LBUTTONUP)
                 {
-                    // 右下座標確定 → ウィンドウをリサイズ
-                    _resizeBottomRight = ms.pt;
-                    ApplyResize();
+                    // LBUTTONUPはLBUTTONDOWNと対になるので抑制しない
+                }
+                else
+                {
+                    // 左クリック以外のマウスイベント（右クリック・ホイール等）→ モード終了
                     CancelResizeMode();
-                    return (IntPtr)1;
                 }
-            }
-            else if (msg == WM_LBUTTONUP)
-            {
-                // LBUTTONUPはLBUTTONDOWNと対になるので抑制しない（通常は飛んでこない）
-                // 何もしない
-            }
-            else
-            {
-                // 左クリック以外のマウスイベント（右クリック・ホイール等）→ モード終了
-                CancelResizeMode();
             }
         }
 
