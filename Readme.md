@@ -82,6 +82,55 @@ Alt+Win+F11 押下
 ```
 
 
+## 設定ファイル
+
+`%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
+ファイルが存在しない場合、アプリ起動時にデフォルト値で**自動生成**されます。
+
+```toml
+# cs-mouse-ctrl 設定ファイル
+# 変更後はアプリを再起動してください。
+
+[speed_multiplier]
+# Shift キーを押しながらマウス移動したときの速度倍率（整数）
+shift = 2
+# Ctrl キーを押しながらマウス移動したときの速度倍率（整数）
+ctrl = 5
+
+[hotkey]
+# NumPad 待ち受けを起動するキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "Pause", "F12", "ScrollLock"
+pause_key = "Pause"
+
+# カーソルクリップ機能の修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
+# 例: ["Ctrl","Alt"] → Ctrl+Alt で機能が有効になる
+clip_modifiers = ["Ctrl", "Alt"]
+
+# ウィンドウリサイズモードの修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
+# 例: ["Alt","Win"] → Alt+Win+F11 でリサイズモード開始
+resize_modifiers = ["Alt", "Win"]
+
+# ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "F11", "F10", "F9"
+resize_key = "F11"
+```
+
+### 設定項目一覧
+
+| セクション | キー | 型 | 既定値 | 説明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `[speed_multiplier]` | `shift` | 整数 | `2` | Shift + マウス移動の速度倍率 |
+| `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
+| `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
+| `[hotkey]` | `clip_modifiers` | 文字列配列 | `["Ctrl","Alt"]` | カーソルクリップ機能の修飾キー |
+| `[hotkey]` | `resize_modifiers` | 文字列配列 | `["Alt","Win"]` | ウィンドウリサイズモードの修飾キー |
+| `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
+
+> [!NOTE]
+> `pause_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"F12"`, `"ScrollLock"`）。
+> `clip_modifiers` / `resize_modifiers` の各要素には `"Ctrl"`, `"Alt"`, `"Shift"`, `"Win"` が使えます。
+
+
 ## Release ビルド & 実行方法
 
 ### ビルド

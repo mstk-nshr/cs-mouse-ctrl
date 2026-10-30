@@ -130,6 +130,9 @@ class Program
 
     static void Main()
     {
+        // 設定ファイルを読み込む（存在しない場合は自動生成）
+        AppConfig.Load();
+
         // 後優先: 既存インスタンスを終了させてから自身が起動する
         KillExistingInstances();
 
@@ -267,7 +270,7 @@ class Program
             }
 
             // Pause キーの処理（NumPad待ちのトグル・キャンセル）
-            if ((Keys)vkCode == Keys.Pause)
+            if ((Keys)vkCode == AppConfig.PauseKey)
             {
                 if (isKeyDown && _resizePhase == ResizePhase.None)
                 {
@@ -335,10 +338,10 @@ class Program
                 MoveCursorToWindowPosition(numpadKey);
             }
 
-            // Alt+Win+F11 → window resize mode
-            // Alt+Win を先に押してから F11 を押すパターンに対応するため、
-            // 修飾キーのエッジ検出ではなく「F11 が押された瞬間に Alt+Win が揃っているか」で判定する。
-            if (isKeyDown && isResizeHotkeyPressed && (Keys)vkCode == Keys.F11
+            // resize_modifiers + resize_key → window resize mode
+            // 修飾キーを先に押してからトリガーキーを押すパターンに対応するため、
+            // 修飾キーのエッジ検出ではなく「トリガーキーが押された瞬間に修飾キーが揃っているか」で判定する。
+            if (isKeyDown && isResizeHotkeyPressed && (Keys)vkCode == AppConfig.ResizeKey
                 && _resizePhase == ResizePhase.None)
             {
                 TryStartResizeMode();
@@ -353,12 +356,12 @@ class Program
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Alt+Win+F11 検出: Alt (left or right) かつ Win (left or right) が押されているか。
+    /// リサイズホットキー検出: AppConfig.ResizeModifiers で指定された修飾キーが押されているか。
     /// F11 キー自体はイベント側で判定するので、ここでは修飾キーのみ確認。
     /// </summary>
     private static bool IsResizeHotkeyPressed()
     {
-        return (leftAltPressed || rightAltPressed) && (leftWinPressed || rightWinPressed);
+        return IsModifierSetPressed(AppConfig.ResizeModifiers);
     }
 
     private static bool IsSystemWindow(IntPtr hWnd)
@@ -452,7 +455,7 @@ class Program
 
                     if ((shiftDown || ctrlDown) && !altDown)
                     {
-                        int multiplier = ctrlDown ? 5 : 2;
+                        int multiplier = ctrlDown ? AppConfig.CtrlMultiplier : AppConfig.ShiftMultiplier;
 
                         if (_lastMousePtValid)
                         {
@@ -677,10 +680,29 @@ class Program
             or Keys.NumPad7 or Keys.NumPad8 or Keys.NumPad9;
     }
 
+    /// <summary>
+    /// 指定されたモディファイアセット（"Ctrl","Alt","Shift","Win"）がすべて押されているか確認する。
+    /// </summary>
+    private static bool IsModifierSetPressed(System.Collections.Generic.HashSet<string> mods)
+    {
+        foreach (string m in mods)
+        {
+            bool pressed = m.ToUpperInvariant() switch
+            {
+                "CTRL"  => leftCtrlPressed  || rightCtrlPressed,
+                "ALT"   => leftAltPressed   || rightAltPressed,
+                "SHIFT" => leftShiftPressed || rightShiftPressed,
+                "WIN"   => leftWinPressed   || rightWinPressed,
+                _ => true  // 未知のモディファイアは無視（常に満たされているとみなす）
+            };
+            if (!pressed) return false;
+        }
+        return mods.Count > 0;
+    }
+
     private static bool IsHotkeyPressed()
     {
-        return (leftCtrlPressed || rightCtrlPressed)
-            && (leftAltPressed || rightAltPressed);
+        return IsModifierSetPressed(AppConfig.ClipModifiers);
     }
 
     private static double Dist(POINT a, POINT b)
