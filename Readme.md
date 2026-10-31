@@ -4,15 +4,14 @@
 
 | Key | Description |
 | --- | ----------- |
-| Ctrl + Alt + Win + Numpad1..9 | move mouse pointer (window 9-positions) |
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
-| Alt + Win + F11 / Pause -> F11 | resize active window. |
+| Pause -> F11 | resize active window |
 | Shift + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
 ### move-mouse-pointer 
 
-`Ctrl + Alt + Win` を押下している間、または `Pause` キーを押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
+`Pause` キーを押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
 
 - **Pauseキー方式（モーダル入力）**:
   - `Pause` キーを押すとテンキー待ち状態に入り、カーソルが対象ウィンドウ内に固定されます。
@@ -33,18 +32,18 @@
 
 | キー | 移動位置 | 計算座標（ウィンドウ矩形内） | 説明 |
 | :--- | :--- | :--- | :--- |
-| **Ctrl + Alt + NumPad 7** | 左上 (Top-Left) | `(Left + 10, Top + 10)` | ウィンドウの左上隅（タイトルバー左側付近）へ移動 |
-| **Ctrl + Alt + NumPad 8** | 上中央 (Top-Center) | `(CenterX, Top + 10)` | ウィンドウの上辺中央（タイトルバー中央付近）へ移動 |
-| **Ctrl + Alt + NumPad 9** | 右上 (Top-Right) | `(Right - 10, Top + 10)` | ウィンドウの右上隅（閉じるボタン付近）へ移動 |
-| **Ctrl + Alt + NumPad 4** | 左中央 (Middle-Left) | `(Left + 10, CenterY)` | ウィンドウの左辺中央へ移動 |
-| **Ctrl + Alt + NumPad 5** | 中央 (Center) | `(CenterX, CenterY)` | ウィンドウの真ん中へ移動 |
-| **Ctrl + Alt + NumPad 6** | 右中央 (Middle-Right) | `(Right - 10, CenterY)` | ウィンドウの右辺中央へ移動 |
-| **Ctrl + Alt + NumPad 1** | 左下 (Bottom-Left) | `(Left + 10, Bottom - 10)` | ウィンドウの左下隅へ移動 |
-| **Ctrl + Alt + NumPad 2** | 下中央 (Bottom-Center) | `(CenterX, Bottom - 10)` | ウィンドウの下辺中央へ移動 |
-| **Ctrl + Alt + NumPad 3** | 右下 (Bottom-Right) | `(Right - 10, Bottom - 10)` | ウィンドウの右下隅へ移動 |
+| **Pause -> NumPad 7** | 左上 (Top-Left) | `(Left + 10, Top + 10)` | ウィンドウの左上隅（タイトルバー左側付近）へ移動 |
+| **Pause -> NumPad 8** | 上中央 (Top-Center) | `(CenterX, Top + 10)` | ウィンドウの上辺中央（タイトルバー中央付近）へ移動 |
+| **Pause -> NumPad 9** | 右上 (Top-Right) | `(Right - 10, Top + 10)` | ウィンドウの右上隅（閉じるボタン付近）へ移動 |
+| **Pause -> NumPad 4** | 左中央 (Middle-Left) | `(Left + 10, CenterY)` | ウィンドウの左辺中央へ移動 |
+| **Pause -> NumPad 5** | 中央 (Center) | `(CenterX, CenterY)` | ウィンドウの真ん中へ移動 |
+| **Pause -> NumPad 6** | 右中央 (Middle-Right) | `(Right - 10, CenterY)` | ウィンドウの右辺中央へ移動 |
+| **Pause -> NumPad 1** | 左下 (Bottom-Left) | `(Left + 10, Bottom - 10)` | ウィンドウの左下隅へ移動 |
+| **Pause -> NumPad 2** | 下中央 (Bottom-Center) | `(CenterX, Bottom - 10)` | ウィンドウの下辺中央へ移動 |
+| **Pause -> NumPad 3** | 右下 (Bottom-Right) | `(Right - 10, Bottom - 10)` | ウィンドウの右下隅へ移動 |
 
 > [!NOTE]
-> - **カーソルクリップ機能**: `Ctrl + Alt` を押している間はマウスカーソルの移動可能範囲が対象ウィンドウ内に制限（`ClipCursor`）されます。キーを離すと自動的に制限が解除されます。
+> - **カーソルクリップ機能**: `Pause` キーを押してテンキー待ち状態に入っている間はマウスカーソルの移動可能範囲が対象ウィンドウ内に制限（`ClipCursor`）されます。移動完了時、またはもう一度 `Pause` キー（もしくは `Esc` キー）を押すと自動的に制限が解除されます。
 > - **マージン**: 各隅の座標はウィンドウ境界の外に出てしまわないよう、境界から内側へ 10px のオフセットが自動適用されます。
 
 
@@ -59,7 +58,7 @@
 | **Ctrl + Shift** + マウス移動 | **5倍** | Ctrl が優先される |
 
 > [!NOTE]
-> - `Ctrl + Alt` の組み合わせは既存の **カーソルクリップ機能** に割り当てられているため、高速移動は適用されません。
+> - `Alt` キーが押されている間はショートカット誤動作防止のため、高速移動は適用されません。
 > - 高速移動中に画面端を超えようとした場合は、仮想スクリーンの端にクランプされます。
 > - キーを離すと即座に通常速度に戻ります。
 
@@ -67,7 +66,7 @@
 ### Resize-Active-Window 動作フロー
 
 ```
-Alt+Win+F11 押下 または Pause -> F11
+Pause -> F11 押下
   ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ 半透明青色オーバーレイ表示
   ↓ マウス→BOX左上へ移動
@@ -102,14 +101,6 @@ ctrl = 5
 # 例: "Pause", "F12", "ScrollLock"
 pause_key = "Pause"
 
-# カーソルクリップ機能の修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
-# 例: ["Ctrl","Alt"] → Ctrl+Alt で機能が有効になる
-clip_modifiers = ["Ctrl", "Alt"]
-
-# ウィンドウリサイズモードの修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
-# 例: ["Alt","Win"] → Alt+Win+F11 でリサイズモード開始
-resize_modifiers = ["Alt", "Win"]
-
 # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "F11", "F10", "F9"
 resize_key = "F11"
@@ -122,13 +113,10 @@ resize_key = "F11"
 | `[speed_multiplier]` | `shift` | 整数 | `2` | Shift + マウス移動の速度倍率 |
 | `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
 | `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
-| `[hotkey]` | `clip_modifiers` | 文字列配列 | `["Ctrl","Alt"]` | カーソルクリップ機能の修飾キー |
-| `[hotkey]` | `resize_modifiers` | 文字列配列 | `["Alt","Win"]` | ウィンドウリサイズモードの修飾キー |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
 
 > [!NOTE]
-> `pause_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"F12"`, `"ScrollLock"`）。
-> `clip_modifiers` / `resize_modifiers` の各要素には `"Ctrl"`, `"Alt"`, `"Shift"`, `"Win"` が使えます。
+> `pause_key` および `resize_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`）。
 
 
 ## Release ビルド & 実行方法

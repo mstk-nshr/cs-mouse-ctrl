@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Windows.Forms;
 
 /// <summary>
@@ -25,22 +23,6 @@ static class AppConfig
     /// config.toml の [hotkey] pause_key に文字列で指定する。
     /// </summary>
     public static Keys PauseKey { get; private set; } = Keys.Pause;
-
-    /// <summary>
-    /// カーソルクリップ機能の修飾キー組み合わせ（デフォルト Ctrl+Alt）。
-    /// config.toml の [hotkey] clip_modifiers に文字列配列で指定する。
-    /// 使用可能な値: "Ctrl", "Alt", "Shift", "Win"
-    /// </summary>
-    public static HashSet<string> ClipModifiers { get; private set; } =
-        new(StringComparer.OrdinalIgnoreCase) { "Ctrl", "Alt" };
-
-    /// <summary>
-    /// ウィンドウリサイズモードの修飾キー組み合わせ（デフォルト Alt+Win）。
-    /// config.toml の [hotkey] resize_modifiers に文字列配列で指定する。
-    /// 使用可能な値: "Ctrl", "Alt", "Shift", "Win"
-    /// </summary>
-    public static HashSet<string> ResizeModifiers { get; private set; } =
-        new(StringComparer.OrdinalIgnoreCase) { "Alt", "Win" };
 
     /// <summary>
     /// ウィンドウリサイズモードを起動するトリガーキー（デフォルト F11）。
@@ -76,14 +58,6 @@ static class AppConfig
         # NumPad 待ち受けを起動するキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "Pause", "F12", "ScrollLock"
         pause_key = "{KeysToString(PauseKey)}"
-
-        # カーソルクリップ機能の修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
-        # 例: ["Ctrl","Alt"] → Ctrl+Alt で機能が有効になる
-        clip_modifiers = {ModifiersToToml(ClipModifiers)}
-
-        # ウィンドウリサイズモードの修飾キー（"Ctrl","Alt","Shift","Win" の組み合わせ）
-        # 例: ["Alt","Win"] → Alt+Win+F11 でリサイズモード開始
-        resize_modifiers = {ModifiersToToml(ResizeModifiers)}
 
         # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "F11", "F10", "F9"
@@ -184,18 +158,6 @@ static class AppConfig
                     if (TryParseKeys(name, out Keys k))
                         PauseKey = k;
                 }
-                if (key == "clip_modifiers")
-                {
-                    var set = ParseStringArray(value);
-                    if (set.Count > 0)
-                        ClipModifiers = set;
-                }
-                if (key == "resize_modifiers")
-                {
-                    var set = ParseStringArray(value);
-                    if (set.Count > 0)
-                        ResizeModifiers = set;
-                }
                 if (key == "resize_key")
                 {
                     string name = UnquoteString(value);
@@ -231,34 +193,11 @@ static class AppConfig
         return s;
     }
 
-    /// <summary>["A","B","C"] → HashSet{"A","B","C"} (case-insensitive)</summary>
-    private static HashSet<string> ParseStringArray(string s)
-    {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        s = s.Trim();
-        if (s.StartsWith('[') && s.EndsWith(']'))
-            s = s[1..^1];
-
-        foreach (string item in s.Split(','))
-        {
-            string v = UnquoteString(item.Trim());
-            if (v.Length > 0)
-                result.Add(v);
-        }
-        return result;
-    }
-
     private static bool TryParseKeys(string name, out Keys key)
     {
         return Enum.TryParse(name, ignoreCase: true, out key);
     }
 
     private static string KeysToString(Keys k) => k.ToString();
-
-    private static string ModifiersToToml(HashSet<string> mods)
-    {
-        string items = string.Join(", ", mods.Select(m => $"\"{m}\""));
-        return $"[{items}]";
-    }
 }
 

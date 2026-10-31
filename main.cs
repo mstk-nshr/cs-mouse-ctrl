@@ -216,9 +216,6 @@ class Program
     {
         if (nCode >= 0)
         {
-            bool wasHotkeyPressed = IsHotkeyPressed();
-            bool wasResizeHotkeyPressed = IsResizeHotkeyPressed();
-
             int vkCode = Marshal.ReadInt32(lParam);
             bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
             bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
@@ -258,9 +255,6 @@ class Program
                         break;
                 }
             }
-
-            bool isHotkeyPressed = IsHotkeyPressed();
-            bool isResizeHotkeyPressed = IsResizeHotkeyPressed();
 
             // 直前に消費したキーの KeyUp を抑制
             if (isKeyUp && _suppressNextKeyUp != Keys.None && (Keys)vkCode == _suppressNextKeyUp)
@@ -325,37 +319,6 @@ class Program
                     return (IntPtr)1;
                 }
             }
-
-            // Clip cursor hotkey (Ctrl+Alt)
-            if (!wasHotkeyPressed && isHotkeyPressed && GetCursorPos(out POINT cursorPosition))
-            {
-                IntPtr window = WindowFromPoint(cursorPosition);
-                activeWindow = window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, GA_ROOT);
-                ClipActiveWindow();
-            }
-            else if (wasHotkeyPressed && !isHotkeyPressed)
-            {
-                if (!_isWaitingForNumpad)
-                {
-                    ClipCursor(IntPtr.Zero);
-                    activeWindow = IntPtr.Zero;
-                }
-            }
-
-            if (isKeyDown && isHotkeyPressed
-                && TryGetNumpadKey(vkCode, lParam, out Keys numpadKey))
-            {
-                MoveCursorToWindowPosition(numpadKey);
-            }
-
-            // resize_modifiers + resize_key → window resize mode
-            // 修飾キーを先に押してからトリガーキーを押すパターンに対応するため、
-            // 修飾キーのエッジ検出ではなく「トリガーキーが押された瞬間に修飾キーが揃っているか」で判定する。
-            if (isKeyDown && isResizeHotkeyPressed && (Keys)vkCode == AppConfig.ResizeKey
-                && _resizePhase == ResizePhase.None)
-            {
-                TryStartResizeMode();
-            }
         }
 
         return CallNextHookEx(_hookID, nCode, wParam, lParam);
@@ -364,15 +327,6 @@ class Program
     // -----------------------------------------------------------------------
     // Window Resize Mode
     // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// リサイズホットキー検出: AppConfig.ResizeModifiers で指定された修飾キーが押されているか。
-    /// F11 キー自体はイベント側で判定するので、ここでは修飾キーのみ確認。
-    /// </summary>
-    private static bool IsResizeHotkeyPressed()
-    {
-        return IsModifierSetPressed(AppConfig.ResizeModifiers);
-    }
 
     private static bool IsSystemWindow(IntPtr hWnd)
     {
@@ -464,7 +418,7 @@ class Program
                     bool shiftDown = leftShiftPressed || rightShiftPressed;
                     bool ctrlDown  = leftCtrlPressed  || rightCtrlPressed;
 
-                    // Ctrl+Alt は ClipCursor ホットキーなので高速移動は除外
+                    // Alt キー押下時は誤動作防止のため高速移動を除外
                     bool altDown = leftAltPressed || rightAltPressed;
 
                     if ((shiftDown || ctrlDown) && !altDown)
@@ -609,16 +563,13 @@ class Program
     private static void CancelNumpadWaiting()
     {
         _isWaitingForNumpad = false;
-        if (!IsHotkeyPressed())
-        {
-            ClipCursor(IntPtr.Zero);
-            activeWindow = IntPtr.Zero;
-        }
+        ClipCursor(IntPtr.Zero);
+        activeWindow = IntPtr.Zero;
     }
 
     private static void Timer_Tick(object? sender, EventArgs e)
     {
-        if (IsHotkeyPressed() || _isWaitingForNumpad)
+        if (_isWaitingForNumpad)
             ClipActiveWindow();
     }
 
@@ -692,31 +643,6 @@ class Program
         return key is Keys.NumPad1 or Keys.NumPad2 or Keys.NumPad3
             or Keys.NumPad4 or Keys.NumPad5 or Keys.NumPad6
             or Keys.NumPad7 or Keys.NumPad8 or Keys.NumPad9;
-    }
-
-    /// <summary>
-    /// 指定されたモディファイアセット（"Ctrl","Alt","Shift","Win"）がすべて押されているか確認する。
-    /// </summary>
-    private static bool IsModifierSetPressed(System.Collections.Generic.HashSet<string> mods)
-    {
-        foreach (string m in mods)
-        {
-            bool pressed = m.ToUpperInvariant() switch
-            {
-                "CTRL"  => leftCtrlPressed  || rightCtrlPressed,
-                "ALT"   => leftAltPressed   || rightAltPressed,
-                "SHIFT" => leftShiftPressed || rightShiftPressed,
-                "WIN"   => leftWinPressed   || rightWinPressed,
-                _ => true  // 未知のモディファイアは無視（常に満たされているとみなす）
-            };
-            if (!pressed) return false;
-        }
-        return mods.Count > 0;
-    }
-
-    private static bool IsHotkeyPressed()
-    {
-        return IsModifierSetPressed(AppConfig.ClipModifiers);
     }
 
     private static double Dist(POINT a, POINT b)
