@@ -314,6 +314,16 @@ class Program
                     }
                     return (IntPtr)1;
                 }
+
+                // pause_key → resize_key シーケンス: NumPad 待ち中に resize_key が押されたらリサイズモードへ
+                if (isKeyDown && (Keys)vkCode == AppConfig.ResizeKey)
+                {
+                    IntPtr target = activeWindow;
+                    CancelNumpadWaiting();
+                    TryStartResizeMode(target);
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
             }
 
             // Clip cursor hotkey (Ctrl+Alt)
@@ -377,17 +387,21 @@ class Program
         return false;
     }
 
-    private static void TryStartResizeMode()
+    private static void TryStartResizeMode(IntPtr preferredTarget = default)
     {
         // 既にリサイズモード中なら無視
         if (_resizePhase != ResizePhase.None) return;
 
+        IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
+
         if (_isWaitingForNumpad)
             CancelNumpadWaiting();
 
-        IntPtr fgWnd = GetForegroundWindow();
-        if (fgWnd == IntPtr.Zero) return;
-        IntPtr rootWnd = GetAncestor(fgWnd, GA_ROOT);
+        if (target == IntPtr.Zero)
+            target = GetForegroundWindow();
+
+        if (target == IntPtr.Zero) return;
+        IntPtr rootWnd = GetAncestor(target, GA_ROOT);
         if (rootWnd == IntPtr.Zero) return;
 
         // デスクトップ・タスクバーは除外

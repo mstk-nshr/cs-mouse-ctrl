@@ -6,7 +6,7 @@
 | --- | ----------- |
 | Ctrl + Alt + Win + Numpad1..9 | move mouse pointer (window 9-positions) |
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
-| Alt + Win + F11 | resize active window. |
+| Alt + Win + F11 / Pause -> F11 | resize active window. |
 | Shift + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -67,8 +67,8 @@
 ### Resize-Active-Window 動作フロー
 
 ```
-Alt+Win+F11 押下
-  ↓ フォアグラウンドウィンドウ取得・デスクトップ/タスクバー除外チェック
+Alt+Win+F11 押下 または Pause -> F11
+  ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ 半透明青色オーバーレイ表示
   ↓ マウス→BOX左上へ移動
 [TopLeft フェーズ]
