@@ -62,6 +62,13 @@ class Program
     [DllImport("user32.dll")]
     static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
     // Structs ---------------------------------------------------------------
 
     private struct POINT { public int X; public int Y; }
@@ -128,6 +135,21 @@ class Program
     private static POINT _resizeBottomRight;
     private static OverlayForm? _overlay;
 
+    // Dim Overlay (Pause 押下時にデスクトップ全体を黒半透明で覆う) ----------
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOPMOST = 0x00000008;
+
+    private static DimOverlayForm? _dimOverlay;
+    private static IntPtr _dimTarget = IntPtr.Zero;
+    private static bool _dimTargetWasTopMost;
+
     static void Main()
     {
         // 設定ファイルを読み込む（存在しない場合は自動生成）
@@ -161,6 +183,7 @@ class Program
             if (_mouseHookID != IntPtr.Zero)
                 UnhookWindowsHookEx(_mouseHookID);
             _overlay?.Close();
+            CloseDimOverlay();
         }
     }
 
@@ -556,6 +579,14 @@ class Program
                 if (fg != IntPtr.Zero)
                     activeWindow = GetAncestor(fg, GA_ROOT);
             }
+
+            // デスクトップ・タスクバーは対象外
+            if (IsSystemWindow(activeWindow))
+                activeWindow = IntPtr.Zero;
+
+            // デスクトップ全体を黒半透明で覆い、対象ウィンドウをその上に表示
+            ShowDimOverlay(activeWindow);
+
             ClipActiveWindow();
         }
     }
@@ -565,6 +596,63 @@ class Program
         _isWaitingForNumpad = false;
         ClipCursor(IntPtr.Zero);
         activeWindow = IntPtr.Zero;
+        CloseDimOverlay();
+    }
+
+    // -----------------------------------------------------------------------
+    // Dim Overlay (デスクトップ全体の黒半透明表示)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// デスクトップ全体を覆う黒半透明ウィンドウを表示し、
+    /// 対象ウィンドウをその上（最前面）に表示する。
+    /// </summary>
+    private static void ShowDimOverlay(IntPtr target)
+    {
+        CloseDimOverlay();
+
+        _dimOverlay = new DimOverlayForm();
+        _dimOverlay.Show();
+        _dimOverlay.BringToTopMost();
+
+        if (target != IntPtr.Zero)
+        {
+            _dimTarget = target;
+            _dimTargetWasTopMost =
+                (GetWindowLong(target, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+            // 対象ウィンドウを最前面へ（黒半透明ウィンドウより手前に表示）
+            SetWindowPos(target, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+    }
+
+    /// <summary>
+    /// 黒半透明ウィンドウを削除し、対象ウィンドウの最前面状態を元に戻す。
+    /// </summary>
+    private static void CloseDimOverlay()
+    {
+        if (_dimTarget != IntPtr.Zero)
+        {
+            // 元々最前面でなかった場合のみ元に戻す
+            if (!_dimTargetWasTopMost)
+            {
+                SetWindowPos(_dimTarget, HWND_NOTOPMOST, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            _dimTarget = IntPtr.Zero;
+            _dimTargetWasTopMost = false;
+        }
+
+        if (_dimOverlay != null)
+        {
+            var ov = _dimOverlay;
+            _dimOverlay = null;
+            if (ov.IsHandleCreated)
+                ov.BeginInvoke(() => ov.Close());
+            else
+                ov.Close();
+        }
     }
 
     private static void Timer_Tick(object? sender, EventArgs e)
@@ -579,9 +667,8 @@ class Program
         if (!GetWindowRect(activeWindow, out RECT rect)
             || rect.Right <= rect.Left || rect.Bottom <= rect.Top)
         {
-            ClipCursor(IntPtr.Zero);
-            activeWindow = IntPtr.Zero;
-            _isWaitingForNumpad = false;
+            // 対象ウィンドウが消失した場合は待機状態を終了し、黒半透明ウィンドウも削除
+            CancelNumpadWaiting();
             return;
         }
 
@@ -752,6 +839,92 @@ class OverlayForm : Form
         // 枠線を描画（ウィンドウ全体が半透明合成される）
         using var borderPen = new System.Drawing.Pen(System.Drawing.Color.White, 2);
         e.Graphics.DrawRectangle(borderPen, 1, 1, Math.Max(0, ClientSize.Width - 2), Math.Max(0, ClientSize.Height - 2));
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+            return cp;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dim Overlay Form: デスクトップ全体を覆う黒色半透明ウィンドウ
+// ---------------------------------------------------------------------------
+
+class DimOverlayForm : Form
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOPMOST = 0x00000008;
+    private const int WS_EX_TRANSPARENT = 0x00000020;
+    private const int WS_EX_LAYERED = 0x00080000;
+    private const int WS_EX_NOACTIVATE = 0x08000000;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+
+    private const uint LWA_ALPHA = 0x02;
+
+    /// <summary>黒色の不透明度（0-255）。値が大きいほど暗くなる。</summary>
+    private const byte DimAlpha = 140;
+
+    protected override bool ShowWithoutActivation => true;
+
+    public DimOverlayForm()
+    {
+        FormBorderStyle = FormBorderStyle.None;
+        TopMost = true;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+
+        // 全モニタ（仮想スクリーン）を覆う
+        System.Drawing.Rectangle vs = SystemInformation.VirtualScreen;
+        Location = new System.Drawing.Point(vs.Left, vs.Top);
+        Size = new System.Drawing.Size(vs.Width, vs.Height);
+        BackColor = System.Drawing.Color.Black;
+
+        // クリックを透過させる（マウス操作は対象ウィンドウへ届く）
+        SetStyle(ControlStyles.Selectable, false);
+        DoubleBuffered = true;
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int exStyle = GetWindowLong(Handle, GWL_EXSTYLE);
+        exStyle |= WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+        SetWindowLong(Handle, GWL_EXSTYLE, exStyle);
+
+        // Alpha-blending: 黒色半透明
+        SetLayeredWindowAttributes(Handle, 0, DimAlpha, LWA_ALPHA);
+
+        BringToTopMost();
+    }
+
+    public void BringToTopMost()
+    {
+        if (IsHandleCreated)
+        {
+            SetWindowPos(Handle, HWND_TOPMOST, Left, Top, Width, Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     protected override CreateParams CreateParams
