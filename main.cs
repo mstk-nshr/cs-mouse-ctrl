@@ -69,6 +69,28 @@ class Program
     [DllImport("user32.dll")]
     static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
+    [DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern bool IsZoomed(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("dwmapi.dll")]
+    static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute,
+        out int pvAttribute, int cbAttribute);
+
     // Structs ---------------------------------------------------------------
 
     private struct POINT { public int X; public int Y; }
@@ -97,6 +119,8 @@ class Program
     private const int WM_LBUTTONUP = 0x0202;
     private const uint GA_ROOT = 2;
     private const int LLKHF_EXTENDED = 0x01;
+    private const int SW_RESTORE = 9;
+    private const int DWMWA_CLOAKED = 14;
 
     private static IntPtr _hookID = IntPtr.Zero;
     private static IntPtr _mouseHookID = IntPtr.Zero;
@@ -123,6 +147,7 @@ class Program
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     private const string MutexName = "Global\\cs-mouse-ctrl-single-instance";
 
@@ -145,6 +170,7 @@ class Program
     private const uint SWP_SHOWWINDOW = 0x0040;
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TOPMOST = 0x00000008;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
 
     private static DimOverlayForm? _dimOverlay;
     private static IntPtr _dimTarget = IntPtr.Zero;
@@ -338,6 +364,16 @@ class Program
                     IntPtr target = activeWindow;
                     CancelNumpadWaiting();
                     TryStartResizeMode(target);
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → fit_key シーケンス: NumPad 待ち中に fit_key が押されたら空きエリアへフィット
+                if (isKeyDown && (Keys)vkCode == AppConfig.FitKey)
+                {
+                    IntPtr target = activeWindow;
+                    CancelNumpadWaiting();
+                    FitWindowToLargestFreeArea(target);
                     _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
@@ -562,6 +598,176 @@ class Program
 
         if (width > 0 && height > 0)
             MoveWindow(_resizeTarget, left, top, width, height, true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Window Fit (空きエリアの最大矩形へ移動)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// 対象ウィンドウを、現在のモニタの作業領域内で最も面積が大きくなる
+    /// 空き矩形へ移動・リサイズする。outer_spacing / inner_spacing を考慮する。
+    /// </summary>
+    private static void FitWindowToLargestFreeArea(IntPtr target)
+    {
+        if (target == IntPtr.Zero) return;
+
+        IntPtr root = GetAncestor(target, GA_ROOT);
+        if (root == IntPtr.Zero) root = target;
+        if (IsSystemWindow(root)) return;
+
+        // 対象ウィンドウが存在するモニタの作業領域（タスクバーを除く）
+        System.Drawing.Rectangle wa = Screen.FromHandle(root).WorkingArea;
+
+        int[] outer = AppConfig.OuterSpacing; // 上, 右, 下, 左
+        int inner = AppConfig.InnerSpacing;
+
+        // outer_spacing を適用した利用可能領域
+        int areaLeft   = wa.Left + outer[3];
+        int areaTop    = wa.Top + outer[0];
+        int areaRight  = wa.Right - outer[1];
+        int areaBottom = wa.Bottom - outer[2];
+        if (areaRight <= areaLeft || areaBottom <= areaTop) return;
+
+        // 他の可視ウィンドウを inner_spacing 分拡張して障害物として収集
+        var obstacles = new System.Collections.Generic.List<System.Drawing.Rectangle>();
+        EnumWindows((hWnd, lParam) =>
+        {
+            if (hWnd == root) return true;
+            if (!IsWindowVisible(hWnd) || IsIconic(hWnd)) return true;
+            if (IsIgnoredWindowForFit(hWnd)) return true;
+            if (!GetWindowRect(hWnd, out RECT r)) return true;
+            if (r.Right <= r.Left || r.Bottom <= r.Top) return true;
+
+            // 利用可能領域と交差しないものは無視
+            if (r.Right <= areaLeft || r.Left >= areaRight ||
+                r.Bottom <= areaTop || r.Top >= areaBottom) return true;
+
+            obstacles.Add(System.Drawing.Rectangle.FromLTRB(
+                r.Left - inner, r.Top - inner, r.Right + inner, r.Bottom + inner));
+            return true;
+        }, IntPtr.Zero);
+
+        // 座標圧縮用の x 候補座標（y は障害物の区間から直接求める）
+        var xs = new System.Collections.Generic.SortedSet<int> { areaLeft, areaRight };
+        foreach (var o in obstacles)
+        {
+            xs.Add(Math.Clamp(o.Left, areaLeft, areaRight));
+            xs.Add(Math.Clamp(o.Right, areaLeft, areaRight));
+        }
+        int[] xArr = new System.Collections.Generic.List<int>(xs).ToArray();
+
+        int bestArea = 0;
+        int bestLeft = 0, bestTop = 0, bestRight = 0, bestBottom = 0;
+
+        // 左右の x 候補の全組み合わせについて、最大の空き y 区間を求める
+        for (int xi = 0; xi < xArr.Length - 1; xi++)
+        {
+            int x1 = xArr[xi];
+            for (int xj = xi + 1; xj < xArr.Length; xj++)
+            {
+                int x2 = xArr[xj];
+                if (x2 <= x1) continue;
+
+                // この x 範囲と水平に重なる障害物の y 区間
+                var blocked = new System.Collections.Generic.List<(int Top, int Bottom)>();
+                foreach (var o in obstacles)
+                {
+                    if (o.Left < x2 && o.Right > x1)
+                    {
+                        int bt = Math.Max(o.Top, areaTop);
+                        int bb = Math.Min(o.Bottom, areaBottom);
+                        if (bt < bb) blocked.Add((bt, bb));
+                    }
+                }
+                blocked.Sort((a, b) => a.Top.CompareTo(b.Top));
+
+                int cursorY = areaTop;
+                foreach (var b in blocked)
+                {
+                    if (b.Top > cursorY)
+                        ConsiderRect(x1, cursorY, x2, b.Top,
+                            ref bestArea, ref bestLeft, ref bestTop, ref bestRight, ref bestBottom);
+                    if (b.Bottom > cursorY) cursorY = b.Bottom;
+                }
+                if (areaBottom > cursorY)
+                    ConsiderRect(x1, cursorY, x2, areaBottom,
+                        ref bestArea, ref bestLeft, ref bestTop, ref bestRight, ref bestBottom);
+            }
+        }
+
+        if (bestArea <= 0) return;
+
+        int width  = bestRight - bestLeft;
+        int height = bestBottom - bestTop;
+        if (width <= 0 || height <= 0) return;
+
+        // 最大化されている場合は復元してから移動する
+        if (IsZoomed(root))
+            ShowWindow(root, SW_RESTORE);
+
+        MoveWindow(root, bestLeft, bestTop, width, height, true);
+    }
+
+    /// <summary>
+    /// Window Fit の障害物として扱わないウィンドウかどうかを判定する。
+    /// デスクトップ・タスクバー・シェル系の全画面ウィンドウ・ツールウィンドウ・
+    /// DWM でクロークされているウィンドウを除外する。
+    /// </summary>
+    private static bool IsIgnoredWindowForFit(IntPtr hWnd)
+    {
+        if (IsSystemWindow(hWnd)) return true;
+        if ((GetWindowLong(hWnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) return true;
+
+        var sb = new System.Text.StringBuilder(256);
+        if (GetClassName(hWnd, sb, sb.Capacity) > 0
+            && _fitIgnoredClasses.Contains(sb.ToString()))
+        {
+            return true;
+        }
+
+        // DWM でクローク（非表示扱い）されているウィンドウは除外
+        if (DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
+            && cloaked != 0)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Window Fit で障害物から除外するシェル系ウィンドウのクラス名。</summary>
+    private static readonly System.Collections.Generic.HashSet<string> _fitIgnoredClasses =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Progman",
+            "WorkerW",
+            "Shell_TrayWnd",
+            "Shell_SecondaryTrayWnd",
+            "Windows.UI.Core.CoreWindow",
+            "EdgeUiInputTopWndClass",
+            "CursorVisualClass",
+            "Tao Thread Event Target",
+            "WinUIDesktopWin32WindowClass",
+        };
+
+    private static void ConsiderRect(int left, int top, int right, int bottom,
+        ref int bestArea, ref int bestLeft, ref int bestTop,
+        ref int bestRight, ref int bestBottom)
+    {
+        int w = right - left;
+        int h = bottom - top;
+        if (w <= 0 || h <= 0) return;
+
+        int area = w * h;
+        if (area > bestArea)
+        {
+            bestArea = area;
+            bestLeft = left;
+            bestTop = top;
+            bestRight = right;
+            bestBottom = bottom;
+        }
     }
 
     // メインロジック -------------------------------------------------------

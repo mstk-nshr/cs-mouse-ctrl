@@ -30,6 +30,24 @@ static class AppConfig
     /// </summary>
     public static Keys ResizeKey { get; private set; } = Keys.F11;
 
+    /// <summary>
+    /// ウィンドウを空きエリアへフィットさせるキー（デフォルト F）。
+    /// config.toml の [hotkey] fit_key に文字列で指定する。
+    /// </summary>
+    public static Keys FitKey { get; private set; } = Keys.F;
+
+    /// <summary>
+    /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
+    /// config.toml の [window_fit] outer_spacing に配列で指定する。
+    /// </summary>
+    public static int[] OuterSpacing { get; private set; } = { 10, 10, 10, 10 };
+
+    /// <summary>
+    /// ウィンドウ間の余白（px）。
+    /// config.toml の [window_fit] inner_spacing に整数で指定する。
+    /// </summary>
+    public static int InnerSpacing { get; private set; } = 10;
+
     // -----------------------------------------------------------------------
     // パス
     // -----------------------------------------------------------------------
@@ -62,6 +80,16 @@ static class AppConfig
         # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "F11", "F10", "F9"
         resize_key = "{KeysToString(ResizeKey)}"
+
+        # ウィンドウを空きエリアへフィットさせるキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "F", "F8"
+        fit_key = "{KeysToString(FitKey)}"
+
+        [window_fit]
+        # デスクトップ端との余白（上, 右, 下, 左 の順、px）
+        outer_spacing = [{OuterSpacing[0]}, {OuterSpacing[1]}, {OuterSpacing[2]}, {OuterSpacing[3]}]
+        # ウィンドウ間の余白（px）
+        inner_spacing = {InnerSpacing}
         """;
 
     // -----------------------------------------------------------------------
@@ -164,6 +192,25 @@ static class AppConfig
                     if (TryParseKeys(name, out Keys k))
                         ResizeKey = k;
                 }
+                if (key == "fit_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        FitKey = k;
+                }
+                break;
+
+            case "window_fit":
+                if (key == "outer_spacing"
+                    && TryParseIntArray(value, out int[] outer) && outer.Length == 4)
+                {
+                    OuterSpacing = outer;
+                }
+                if (key == "inner_spacing"
+                    && int.TryParse(value, out int inner) && inner >= 0)
+                {
+                    InnerSpacing = inner;
+                }
                 break;
         }
     }
@@ -196,6 +243,31 @@ static class AppConfig
     private static bool TryParseKeys(string name, out Keys key)
     {
         return Enum.TryParse(name, ignoreCase: true, out key);
+    }
+
+    /// <summary>"[10, 10, 10, 10]" → int[] { 10, 10, 10, 10 }</summary>
+    private static bool TryParseIntArray(string s, out int[] result)
+    {
+        result = Array.Empty<int>();
+        s = s.Trim();
+        if (s.Length < 2 || s[0] != '[' || s[^1] != ']')
+            return false;
+
+        string inner = s[1..^1];
+        string[] parts = inner.Split(',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            return false;
+
+        int[] values = new int[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], out values[i]))
+                return false;
+        }
+
+        result = values;
+        return true;
     }
 
     private static string KeysToString(Keys k) => k.ToString();

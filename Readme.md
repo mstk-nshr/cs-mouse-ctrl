@@ -6,6 +6,7 @@
 | --- | ----------- |
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
 | Pause -> F11 | resize active window |
+| Pause -> F | fit active window to the largest free area |
 | Shift + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -84,6 +85,23 @@ Pause -> F11 押下
 ```
 
 
+### Window Fit 動作フロー
+
+```
+Pause -> F 押下
+  ↓ 対象ウィンドウ取得（カーソル直下のウィンドウ）
+  ↓ 対象ウィンドウが存在するモニタの作業領域を取得
+  ↓ outer_spacing を適用した利用可能領域を算出
+  ↓ 他の可視ウィンドウを inner_spacing 分拡張して障害物として収集
+  ↓ 座標圧縮により、面積が最大になる空き矩形を探索
+  ↓ MoveWindow() で対象ウィンドウを移動・リサイズ
+```
+
+- 対象ウィンドウは、現在のモニタの作業領域（タスクバーを除く）内で**面積が最大になる空き矩形**へ移動します。
+- `outer_spacing` によりデスクトップ端との余白を、`inner_spacing` により他のウィンドウとの余白を確保します。
+- 他のウィンドウは `inner_spacing` 分だけ外側に拡張した領域として扱われるため、移動後のウィンドウとの間に必ず `inner_spacing` 以上の間隔が空きます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -107,6 +125,16 @@ pause_key = "Pause"
 # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "F11", "F10", "F9"
 resize_key = "F11"
+
+# ウィンドウを空きエリアへフィットさせるキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "F", "F8"
+fit_key = "F"
+
+[window_fit]
+# デスクトップ端との余白（上, 右, 下, 左 の順、px）
+outer_spacing = [10, 10, 10, 10]
+# ウィンドウ間の余白（px）
+inner_spacing = 10
 ```
 
 ### 設定項目一覧
@@ -117,9 +145,14 @@ resize_key = "F11"
 | `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
 | `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
+| `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
+| `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
+| `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 
 > [!NOTE]
-> `pause_key` および `resize_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`）。
+> `pause_key` / `resize_key` / `fit_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`）。
+>
+> `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 
 
 ## Release ビルド & 実行方法
@@ -159,3 +192,4 @@ h:\prj\cs-mouse-ctrl\bin\Release\net9.0-windows\win-x64\publish\cs-mouse-ctrl.ex
 
 > [!NOTE]
 > バックグラウンドで常駐するツールなので、タスクトレイには表示されません。停止するには **タスクマネージャー** から `cs-mouse-ctrl.exe` を終了するか、新しいインスタンスを起動すると既存インスタンスが自動終了します（後優先の仕様）。
+
