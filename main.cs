@@ -218,6 +218,7 @@ class Program
                 UnhookWindowsHookEx(_mouseHookID);
             _overlay?.Close();
             CloseDimOverlay();
+            TrayIcon.CloseHelpPopup();
 
             _trayIcon?.Dispose();
             _trayIcon = null;
@@ -828,7 +829,6 @@ class Program
 
     private static void StartNumpadWaiting()
     {
-        _isWaitingForNumpad = true;
         if (GetCursorPos(out POINT cursorPosition))
         {
             IntPtr window = WindowFromPoint(cursorPosition);
@@ -849,6 +849,11 @@ class Program
 
             ClipActiveWindow();
         }
+
+        // 対象windowが最前面に表示された後、次のキー入力待ちの直前にヘルプを表示（次のキー入力まで表示したままにするため autoClose: false）
+        TrayIcon.ShowHelpPopup(autoClose: false);
+
+        _isWaitingForNumpad = true;
     }
 
     private static void CancelNumpadWaiting()
@@ -857,6 +862,7 @@ class Program
         ClipCursor(IntPtr.Zero);
         activeWindow = IntPtr.Zero;
         CloseDimOverlay();
+        TrayIcon.CloseHelpPopup();
     }
 
     // -----------------------------------------------------------------------

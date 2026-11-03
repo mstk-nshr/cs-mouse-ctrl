@@ -13,6 +13,16 @@ sealed class TrayIcon : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
 
@@ -61,14 +71,32 @@ sealed class TrayIcon : IDisposable
     }
 
     /// <summary>
-    /// キー割り当てのヘルプポップアップをカーソル（トレイアイコン）付近に表示する。
+    /// キー割り当てのヘルプポップアップをカーソル付近に表示する。
     /// </summary>
-    private static void ShowHelpPopup()
+    /// <param name="autoClose">一定時間（5秒）で自動的に閉じるかどうか。</param>
+    internal static void ShowHelpPopup(bool autoClose = true)
     {
         _helpPopup?.Close();
-        _helpPopup = new HelpPopupForm(BuildHelpText());
+        _helpPopup = new HelpPopupForm(BuildHelpText(), autoClose);
         _helpPopup.FormClosed += (_, _) => _helpPopup = null;
         _helpPopup.Show();
+        _helpPopup.BringToTopMost();
+    }
+
+    /// <summary>
+    /// 表示中のヘルプポップアップを閉じる。
+    /// </summary>
+    internal static void CloseHelpPopup()
+    {
+        if (_helpPopup != null)
+        {
+            var p = _helpPopup;
+            _helpPopup = null;
+            if (p.IsHandleCreated)
+                p.BeginInvoke(() => p.Close());
+            else
+                p.Close();
+        }
     }
 
     /// <summary>
@@ -114,6 +142,8 @@ sealed class TrayIcon : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        CloseHelpPopup();
 
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
@@ -187,11 +217,11 @@ sealed class TrayIcon : IDisposable
     /// </summary>
     private sealed class HelpPopupForm : Form
     {
-        private readonly System.Windows.Forms.Timer _closeTimer;
+        private readonly System.Windows.Forms.Timer? _closeTimer;
 
         protected override bool ShowWithoutActivation => true;
 
-        public HelpPopupForm(string text)
+        public HelpPopupForm(string text, bool autoClose = true)
         {
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -216,27 +246,59 @@ sealed class TrayIcon : IDisposable
                 label.PreferredWidth + Padding.Horizontal,
                 label.PreferredHeight + Padding.Vertical);
 
+            // 初期位置をカーソル周辺に決定
+            UpdatePosition();
+
             // クリックで閉じる
             Click += (_, _) => Close();
             label.Click += (_, _) => Close();
 
-            // 一定時間で自動的に閉じる
-            _closeTimer = new System.Windows.Forms.Timer { Interval = 5000 };
-            _closeTimer.Tick += (_, _) => Close();
-            _closeTimer.Start();
+            if (autoClose)
+            {
+                // 一定時間で自動的に閉じる
+                _closeTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+                _closeTimer.Tick += (_, _) => Close();
+                _closeTimer.Start();
+            }
+        }
+
+        private void UpdatePosition()
+        {
+            Point cursorPt = Cursor.Position;
+            Rectangle wa = Screen.FromPoint(cursorPt).WorkingArea;
+
+            int x = cursorPt.X - Width / 2;
+            int y = cursorPt.Y - Height - 12;
+            // 上側に十分な余白がない場合はカーソルの下側に表示
+            if (y < wa.Top)
+                y = cursorPt.Y + 24;
+
+            x = Math.Clamp(x, wa.Left, Math.Max(wa.Left, wa.Right - Width));
+            y = Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - Height));
+            Location = new Point(x, y);
+        }
+
+        public void BringToTopMost()
+        {
+            if (IsHandleCreated)
+            {
+                SetWindowPos(Handle, HWND_TOPMOST, Left, Top, Width, Height,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            }
         }
 
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            UpdatePosition();
+            BringToTopMost();
+        }
 
-            // カーソル（トレイアイコン）の上側に表示し、画面内にクランプ
-            Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
-            int x = Cursor.Position.X - Width / 2;
-            int y = Cursor.Position.Y - Height - 12;
-            x = Math.Clamp(x, wa.Left, Math.Max(wa.Left, wa.Right - Width));
-            y = Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - Height));
-            Location = new Point(x, y);
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using var borderPen = new Pen(Color.FromArgb(90, 90, 90), 1);
+            e.Graphics.DrawRectangle(borderPen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
         }
 
         protected override CreateParams CreateParams
@@ -252,7 +314,7 @@ sealed class TrayIcon : IDisposable
         protected override void Dispose(bool disposing)
         {
             if (disposing)
-                _closeTimer.Dispose();
+                _closeTimer?.Dispose();
             base.Dispose(disposing);
         }
     }
