@@ -91,6 +91,9 @@ class Program
     static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute,
         out int pvAttribute, int cbAttribute);
 
+    [DllImport("user32.dll")]
+    static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
     // Structs ---------------------------------------------------------------
 
     private struct POINT { public int X; public int Y; }
@@ -121,6 +124,8 @@ class Program
     private const int LLKHF_EXTENDED = 0x01;
     private const int SW_RESTORE = 9;
     private const int DWMWA_CLOAKED = 14;
+    private const int KEYEVENTF_KEYUP = 0x0002;
+    private const byte VK_MENU_MASK = 0xE8;
 
     private static IntPtr _hookID = IntPtr.Zero;
     private static IntPtr _mouseHookID = IntPtr.Zero;
@@ -128,6 +133,7 @@ class Program
     private static bool rightCtrlPressed;
     private static bool leftAltPressed;
     private static bool rightAltPressed;
+    private static bool _altMaskSent;
     private static bool leftWinPressed;
     private static bool rightWinPressed;
     private static bool leftShiftPressed;
@@ -339,9 +345,19 @@ class Program
                         break;
                     case Keys.LMenu:
                         leftAltPressed = pressed;
+                        if (!pressed)
+                        {
+                            _lastMousePtValid = false;
+                            _altMaskSent = false;
+                        }
                         break;
                     case Keys.RMenu:
                         rightAltPressed = pressed;
+                        if (!pressed)
+                        {
+                            _lastMousePtValid = false;
+                            _altMaskSent = false;
+                        }
                         break;
                     case Keys.LWin:
                         leftWinPressed = pressed;
@@ -351,11 +367,9 @@ class Program
                         break;
                     case Keys.LShiftKey:
                         leftShiftPressed = pressed;
-                        if (!pressed) _lastMousePtValid = false;
                         break;
                     case Keys.RShiftKey:
                         rightShiftPressed = pressed;
-                        if (!pressed) _lastMousePtValid = false;
                         break;
                 }
             }
@@ -529,15 +543,20 @@ class Program
                 // --- 高速移動 (Resize Mode 外のみ) ---
                 if (_resizePhase == ResizePhase.None)
                 {
-                    bool shiftDown = leftShiftPressed || rightShiftPressed;
-                    bool ctrlDown  = leftCtrlPressed  || rightCtrlPressed;
+                    bool altDown  = leftAltPressed  || rightAltPressed;
+                    bool ctrlDown = leftCtrlPressed || rightCtrlPressed;
 
-                    // Alt キー押下時は誤動作防止のため高速移動を除外
-                    bool altDown = leftAltPressed || rightAltPressed;
-
-                    if ((shiftDown || ctrlDown) && !altDown)
+                    if (altDown || ctrlDown)
                     {
-                        int multiplier = ctrlDown ? AppConfig.CtrlMultiplier : AppConfig.ShiftMultiplier;
+                        int multiplier = ctrlDown ? AppConfig.CtrlMultiplier : AppConfig.AltMultiplier;
+
+                        if (altDown && !_altMaskSent)
+                        {
+                            // Alt 単体押し離しによるアクティブウィンドウのメニューバー活性化を抑止
+                            keybd_event(VK_MENU_MASK, 0, 0, UIntPtr.Zero);
+                            keybd_event(VK_MENU_MASK, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                            _altMaskSent = true;
+                        }
 
                         if (_lastMousePtValid)
                         {

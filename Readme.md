@@ -7,7 +7,7 @@
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
 | Pause -> F11 | resize active window |
 | Pause -> F | fit active window to the largest free area |
-| Shift + Mouse Move | move mouse pointer at 2× speed |
+| Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
 ### システムトレイ
@@ -66,16 +66,15 @@
 
 ### 高速マウス移動
 
-`Shift` または `Ctrl` キーを押しながらマウスを動かすと、移動量が増幅されマウスポインターが高速に移動します。
+`Alt` または `Ctrl` キーを押しながらマウスを動かすと、移動量が増幅されマウスポインターが高速に移動します。
 
 | キー | 倍率 | 説明 |
 | :--- | :---: | :--- |
-| **Shift** + マウス移動 | **2倍** | 通常の移動量を 2 倍に増幅 |
+| **Alt** + マウス移動 | **2倍** | 通常の移動量を 2 倍に増幅 |
 | **Ctrl** + マウス移動 | **5倍** | 通常の移動量を 5 倍に増幅 |
-| **Ctrl + Shift** + マウス移動 | **5倍** | Ctrl が優先される |
+| **Ctrl + Alt** + マウス移動 | **5倍** | Ctrl が優先される |
 
 > [!NOTE]
-> - `Alt` キーが押されている間はショートカット誤動作防止のため、高速移動は適用されません。
 > - 高速移動中に画面端を超えようとした場合は、仮想スクリーンの端にクランプされます。
 > - キーを離すと即座に通常速度に戻ります。
 
@@ -125,8 +124,8 @@ Pause -> F 押下
 # 変更後はアプリを再起動してください。
 
 [speed_multiplier]
-# Shift キーを押しながらマウス移動したときの速度倍率（整数）
-shift = 2
+# Alt キーを押しながらマウス移動したときの速度倍率（整数）
+alt = 2
 # Ctrl キーを押しながらマウス移動したときの速度倍率（整数）
 ctrl = 5
 
@@ -154,7 +153,7 @@ inner_spacing = 10
 
 | セクション | キー | 型 | 既定値 | 説明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `[speed_multiplier]` | `shift` | 整数 | `2` | Shift + マウス移動の速度倍率 |
+| `[speed_multiplier]` | `alt` | 整数 | `2` | Alt + マウス移動の速度倍率 |
 | `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
 | `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
@@ -205,4 +204,12 @@ h:\prj\cs-mouse-ctrl\bin\Release\net9.0-windows\win-x64\publish\cs-mouse-ctrl.ex
 
 > [!NOTE]
 > バックグラウンドで常駐するツールです。タスクトレイのアイコンを右クリックして **停止** を選ぶと終了できます。また、新しいインスタンスを起動すると既存インスタンスが自動終了します（後優先の仕様）。
+
+## TODO
+
+### Pause -> F4 to close the window
+
+### Pause -> ? to display the window process information
+
+### Pause -> Tab to switch the target window
 

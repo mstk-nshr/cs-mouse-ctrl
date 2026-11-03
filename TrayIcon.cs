@@ -134,7 +134,7 @@ sealed class TrayIcon : IDisposable
             $"{pause} → NumPad1..9: カーソル移動\n" +
             $"{pause} → {resize}, click, click: ウィンドウリサイズ\n" +
             $"{pause} → {fit}: 空きエリアへフィット\n" +
-            $"Shift + マウス移動: {AppConfig.ShiftMultiplier}倍速\n" +
+            $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
             $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
     }
 

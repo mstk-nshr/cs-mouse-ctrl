@@ -12,8 +12,11 @@ static class AppConfig
     // 設定値（既定値）
     // -----------------------------------------------------------------------
 
-    /// <summary>Shift + Mouse Move の速度倍率（デフォルト 2）</summary>
-    public static int ShiftMultiplier { get; private set; } = 2;
+    /// <summary>Alt + Mouse Move の速度倍率（デフォルト 2）</summary>
+    public static int AltMultiplier { get; private set; } = 2;
+
+    /// <summary>互換用エイリアス</summary>
+    public static int ShiftMultiplier => AltMultiplier;
 
     /// <summary>Ctrl + Mouse Move の速度倍率（デフォルト 5）</summary>
     public static int CtrlMultiplier { get; private set; } = 5;
@@ -67,8 +70,8 @@ static class AppConfig
         # 変更後はアプリを再起動してください。
 
         [speed_multiplier]
-        # Shift キーを押しながらマウス移動したときの速度倍率（整数）
-        shift = {ShiftMultiplier}
+        # Alt キーを押しながらマウス移動したときの速度倍率（整数）
+        alt = {AltMultiplier}
         # Ctrl キーを押しながらマウス移動したときの速度倍率（整数）
         ctrl = {CtrlMultiplier}
 
@@ -173,8 +176,8 @@ static class AppConfig
         switch (section)
         {
             case "speed_multiplier":
-                if (key == "shift" && int.TryParse(value, out int sv) && sv >= 1)
-                    ShiftMultiplier = sv;
+                if ((key == "alt" || key == "shift") && int.TryParse(value, out int av) && av >= 1)
+                    AltMultiplier = av;
                 if (key == "ctrl"  && int.TryParse(value, out int cv) && cv >= 1)
                     CtrlMultiplier = cv;
                 break;
