@@ -151,6 +151,11 @@ class Program
 
     private const string MutexName = "Global\\cs-mouse-ctrl-single-instance";
 
+    // システムトレイ --------------------------------------------------------
+
+    private static TrayIcon? _trayIcon;
+    private static bool _restartRequested;
+
     // Window Resize Mode ----------------------------------------------------
 
     private enum ResizePhase { None, TopLeft, BottomRight }
@@ -192,6 +197,9 @@ class Program
         _hookID = SetHook(_proc);
         _mouseHookID = SetMouseHook(_mouseProc);
 
+        // システムトレイに常駐アイコンを表示
+        _trayIcon = new TrayIcon(RequestRestart, RequestExit);
+
         // 10ms タイマーでカーソル監視
         System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         timer.Interval = 10;
@@ -210,6 +218,52 @@ class Program
                 UnhookWindowsHookEx(_mouseHookID);
             _overlay?.Close();
             CloseDimOverlay();
+
+            _trayIcon?.Dispose();
+            _trayIcon = null;
+
+            // トレイメニューから再起動が要求されていれば新しいインスタンスを起動
+            if (_restartRequested)
+                StartNewInstance();
+        }
+    }
+
+    /// <summary>
+    /// トレイメニューの「停止」: トレイアイコンを片付けてアプリを終了する。
+    /// </summary>
+    internal static void RequestExit()
+    {
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        Application.Exit();
+    }
+
+    /// <summary>
+    /// トレイメニューの「再起動」: 終了処理後に新しいインスタンスを起動する。
+    /// </summary>
+    internal static void RequestRestart()
+    {
+        _restartRequested = true;
+        RequestExit();
+    }
+
+    /// <summary>
+    /// 現在の実行ファイルを新しいプロセスとして起動する。
+    /// </summary>
+    private static void StartNewInstance()
+    {
+        try
+        {
+            string? exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe))
+                exe = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrEmpty(exe)) return;
+
+            Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Program] 再起動に失敗: {ex.Message}");
         }
     }
 
