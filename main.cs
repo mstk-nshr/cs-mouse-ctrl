@@ -97,10 +97,73 @@ class Program
     [DllImport("user32.dll")]
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
+    [DllImport("user32.dll")]
+    static extern bool SetSystemCursor(IntPtr hcur, uint id);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr CopyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll")]
+    static extern bool SystemParametersInfo(uint uiAction, uint uiParam,
+        IntPtr pvParam, uint fWinIni);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr CreateIconIndirect(ref ICONINFO piconinfo);
+
+    [DllImport("user32.dll")]
+    static extern bool DestroyCursor(IntPtr hCursor);
+
+    [DllImport("gdi32.dll")]
+    static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi,
+        uint usage, out IntPtr ppvBits, IntPtr hSection, uint offset);
+
+    [DllImport("gdi32.dll")]
+    static extern IntPtr CreateBitmap(int nWidth, int nHeight, uint nPlanes,
+        uint nBitCount, byte[] lpBits);
+
+    [DllImport("gdi32.dll")]
+    static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+    static extern void CopyMemory(IntPtr dest, IntPtr src, UIntPtr count);
+
     // Structs ---------------------------------------------------------------
 
     private struct POINT { public int X; public int Y; }
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ICONINFO
+    {
+        public bool fIcon;
+        public int xHotspot;
+        public int yHotspot;
+        public IntPtr hbmMask;
+        public IntPtr hbmColor;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAPINFOHEADER
+    {
+        public uint biSize;
+        public int biWidth;
+        public int biHeight;
+        public ushort biPlanes;
+        public ushort biBitCount;
+        public uint biCompression;
+        public uint biSizeImage;
+        public int biXPelsPerMeter;
+        public int biYPelsPerMeter;
+        public uint biClrUsed;
+        public uint biClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BITMAPINFO
+    {
+        public BITMAPINFOHEADER bmiHeader;
+        public uint bmiColors;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MSLLHOOKSTRUCT
@@ -196,6 +259,45 @@ class Program
     private static bool _suppressNextRButtonUp;
     private static bool _suppressNextMButtonUp;
 
+    // Move Mode 用カーソル（手のひら形状）
+    private static IntPtr _moveCursorHandle = IntPtr.Zero;
+    private static bool _moveCursorApplied;
+
+    // システムカーソルの種類（SetSystemCursor の id 引数）
+    private const uint OCR_NORMAL = 32512;
+    private const uint OCR_IBEAM = 32513;
+    private const uint OCR_WAIT = 32514;
+    private const uint OCR_CROSS = 32515;
+    private const uint OCR_UP = 32516;
+    private const uint OCR_SIZE = 32640;
+    private const uint OCR_ICON = 32641;
+    private const uint OCR_SIZENWSE = 32642;
+    private const uint OCR_SIZENESW = 32643;
+    private const uint OCR_SIZEWE = 32644;
+    private const uint OCR_SIZENS = 32645;
+    private const uint OCR_SIZEALL = 32646;
+    private const uint OCR_ICOCUR = 32647;
+    private const uint OCR_NO = 32648;
+    private const uint OCR_HAND = 32649;
+    private const uint OCR_APPSTARTING = 32650;
+    private const uint OCR_HELP = 32651;
+
+    private const uint SPI_SETCURSORS = 0x0057;
+    private const uint SPIF_SENDCHANGE = 0x02;
+
+    /// <summary>
+    /// 移動モード中に手のひらへ置き換えるシステムカーソルの種類。
+    /// 矢印・Iビーム（キャレット）・サイズ変更・待機など、その時点で
+    /// 表示され得るカーソルをすべて手のひらに統一する。
+    /// </summary>
+    private static readonly uint[] _cursorTypes =
+    {
+        OCR_NORMAL, OCR_IBEAM, OCR_WAIT, OCR_CROSS, OCR_UP,
+        OCR_SIZE, OCR_ICON, OCR_SIZENWSE, OCR_SIZENESW, OCR_SIZEWE,
+        OCR_SIZENS, OCR_SIZEALL, OCR_ICOCUR, OCR_NO, OCR_HAND,
+        OCR_APPSTARTING, OCR_HELP,
+    };
+
     // Dim Overlay (Pause 押下時にデスクトップ全体を黒半透明で覆う) ----------
 
     private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
@@ -209,6 +311,7 @@ class Program
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TOPMOST = 0x00000008;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_NOACTIVATE = 0x08000000;
 
     private static DimOverlayForm? _dimOverlay;
     private static IntPtr _dimTarget = IntPtr.Zero;
@@ -221,6 +324,10 @@ class Program
 
         // 後優先: 既存インスタンスを終了させてから自身が起動する
         KillExistingInstances();
+
+        // 前回の異常終了などでシステムカーソルが置き換わったまま残っている
+        // 場合に備え、起動時にレジストリの設定から復元しておく。
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, SPIF_SENDCHANGE);
 
         using Mutex mutex = new Mutex(true, MutexName, out bool createdNew);
         // createdNew が false になるケースはほぼないが念のため待機
@@ -253,6 +360,13 @@ class Program
             CancelMoveMode();
             CloseDimOverlay();
             TrayIcon.CloseHelpPopup();
+
+            // 生成したカーソルリソースを解放
+            if (_moveCursorHandle != IntPtr.Zero)
+            {
+                DestroyCursor(_moveCursorHandle);
+                _moveCursorHandle = IntPtr.Zero;
+            }
 
             _trayIcon?.Dispose();
             _trayIcon = null;
@@ -651,6 +765,9 @@ class Program
         _lastAppliedMoveX = rect.Left;
         _lastAppliedMoveY = rect.Top;
         _isMoveMode = true;
+
+        // カーソルを手のひら形状へ変更
+        ApplyMoveCursor();
     }
 
     private static void CommitMoveMode()
@@ -658,12 +775,14 @@ class Program
         if (!_isMoveMode) return;
         _isMoveMode = false;
         _moveTarget = IntPtr.Zero;
+        RestoreMoveCursor();
     }
 
     private static void CancelMoveMode()
     {
         if (!_isMoveMode) return;
         _isMoveMode = false;
+        RestoreMoveCursor();
         if (_moveTarget != IntPtr.Zero)
         {
             if (_moveWasZoomed)
@@ -678,6 +797,232 @@ class Program
             }
             _moveTarget = IntPtr.Zero;
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Move Mode 用カーソル（手のひら形状）
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// ウィンドウ移動モード用の「手のひら」カーソルを生成する（初回のみ）。
+    /// </summary>
+    private static void EnsureMoveCursor()
+    {
+        if (_moveCursorHandle != IntPtr.Zero) return;
+
+        try
+        {
+            int size = Math.Max(32, SystemInformation.CursorSize.Width);
+            using var bmp = new System.Drawing.Bitmap(size, size,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.Clear(System.Drawing.Color.Transparent);
+                DrawOpenHand(g, size);
+            }
+
+            // ホットスポットは画像中央（手のひら付近）
+            _moveCursorHandle = CreateCursorFromBitmap(bmp, size / 2, size / 2);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Program] カーソル生成に失敗: {ex.Message}");
+            _moveCursorHandle = IntPtr.Zero;
+        }
+    }
+
+    /// <summary>
+    /// 手のひら（開いた手）の形状を描画する。
+    /// まず Segoe UI Symbol の ✋ (U+270B) グリフを輪郭として利用し、
+    /// 取得できない場合は図形で代替する。
+    /// </summary>
+    private static void DrawOpenHand(System.Drawing.Graphics g, int size)
+    {
+        float pad = size * 0.06f;
+        float target = size - pad * 2f;
+
+        System.Drawing.Drawing2D.GraphicsPath? path = null;
+        try
+        {
+            using var family = new System.Drawing.FontFamily("Segoe UI Symbol");
+            path = new System.Drawing.Drawing2D.GraphicsPath();
+            path.AddString("\u270B", family,
+                (int)System.Drawing.FontStyle.Regular, 100f,
+                System.Drawing.PointF.Empty,
+                System.Drawing.StringFormat.GenericTypographic);
+        }
+        catch
+        {
+            path?.Dispose();
+            path = null;
+        }
+
+        if (path == null || path.PointCount == 0)
+        {
+            path?.Dispose();
+            path = BuildHandPath();
+        }
+
+        System.Drawing.RectangleF b = path.GetBounds();
+        if (b.Width <= 0f || b.Height <= 0f)
+        {
+            path.Dispose();
+            return;
+        }
+
+        // 目標サイズにフィットさせて中央へ配置
+        float scale = Math.Min(target / b.Width, target / b.Height);
+        using (var m = new System.Drawing.Drawing2D.Matrix())
+        {
+            m.Translate(-b.X, -b.Y, System.Drawing.Drawing2D.MatrixOrder.Append);
+            m.Scale(scale, scale, System.Drawing.Drawing2D.MatrixOrder.Append);
+            m.Translate(
+                pad + (target - b.Width * scale) / 2f,
+                pad + (target - b.Height * scale) / 2f,
+                System.Drawing.Drawing2D.MatrixOrder.Append);
+            path.Transform(m);
+        }
+
+        using (var fill = new System.Drawing.SolidBrush(System.Drawing.Color.White))
+        using (var outline = new System.Drawing.Pen(System.Drawing.Color.Black,
+            Math.Max(1f, size / 24f)))
+        {
+            outline.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+            g.FillPath(fill, path);
+            g.DrawPath(outline, path);
+        }
+
+        path.Dispose();
+    }
+
+    /// <summary>
+    /// グリフが利用できない場合の代替: 手のひら・指・親指を図形で組み立てる。
+    /// </summary>
+    private static System.Drawing.Drawing2D.GraphicsPath BuildHandPath()
+    {
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+
+        // 手のひら
+        AddRoundedRect(path, 8f, 14f, 16f, 15f, 5f);
+
+        // 指（4本）
+        float[] fingerX = { 8.8f, 12.6f, 16.4f, 20.2f };
+        foreach (float x in fingerX)
+            AddRoundedRect(path, x, 5f, 3f, 12f, 1.5f);
+
+        // 親指（左下へ傾ける）
+        var thumb = new System.Drawing.Drawing2D.GraphicsPath();
+        AddRoundedRect(thumb, 0f, 0f, 3.5f, 8f, 1.6f);
+        using (var m = new System.Drawing.Drawing2D.Matrix())
+        {
+            m.RotateAt(-35f, new System.Drawing.PointF(1.75f, 8f));
+            m.Translate(5f, 15f, System.Drawing.Drawing2D.MatrixOrder.Append);
+            thumb.Transform(m);
+        }
+        path.AddPath(thumb, false);
+        thumb.Dispose();
+
+        return path;
+    }
+
+    private static void AddRoundedRect(System.Drawing.Drawing2D.GraphicsPath path,
+        float x, float y, float w, float h, float r)
+    {
+        float d = r * 2f;
+        path.AddArc(x, y, d, d, 180f, 90f);
+        path.AddArc(x + w - d, y, d, d, 270f, 90f);
+        path.AddArc(x + w - d, y + h - d, d, d, 0f, 90f);
+        path.AddArc(x, y + h - d, d, d, 90f, 90f);
+        path.CloseFigure();
+    }
+
+    /// <summary>
+    /// 32bpp ARGB ビットマップから、指定ホットスポットのカーソルを生成する。
+    /// </summary>
+    private static IntPtr CreateCursorFromBitmap(System.Drawing.Bitmap bmp,
+        int hotX, int hotY)
+    {
+        int w = bmp.Width;
+        int h = bmp.Height;
+
+        var bmi = new BITMAPINFO();
+        bmi.bmiHeader.biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>();
+        bmi.bmiHeader.biWidth = w;
+        bmi.bmiHeader.biHeight = -h; // トップダウン
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = 0; // BI_RGB
+
+        IntPtr hColor = CreateDIBSection(IntPtr.Zero, ref bmi, 0,
+            out IntPtr bits, IntPtr.Zero, 0);
+        if (hColor == IntPtr.Zero) return IntPtr.Zero;
+
+        // ピクセルをコピー（アルファチャンネルを保持）
+        var data = bmp.LockBits(new System.Drawing.Rectangle(0, 0, w, h),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            for (int y = 0; y < h; y++)
+            {
+                CopyMemory(IntPtr.Add(bits, y * w * 4),
+                    IntPtr.Add(data.Scan0, y * data.Stride),
+                    (UIntPtr)(uint)(w * 4));
+            }
+        }
+        finally
+        {
+            bmp.UnlockBits(data);
+        }
+
+        // AND マスク（全 0 = カラービットマップのアルファを使用）
+        int maskStride = ((w + 15) / 16) * 2;
+        IntPtr hMask = CreateBitmap(w, h, 1, 1, new byte[maskStride * h]);
+
+        var ii = new ICONINFO
+        {
+            fIcon = false,
+            xHotspot = hotX,
+            yHotspot = hotY,
+            hbmMask = hMask,
+            hbmColor = hColor,
+        };
+        IntPtr hCursor = CreateIconIndirect(ref ii);
+
+        DeleteObject(hColor);
+        DeleteObject(hMask);
+        return hCursor;
+    }
+
+    /// <summary>移動モード中のカーソルを手のひら形状にする。</summary>
+    private static void ApplyMoveCursor()
+    {
+        EnsureMoveCursor();
+        if (_moveCursorHandle == IntPtr.Zero) return;
+
+        // SetCursor はスレッド単位で、対象ウィンドウ（別スレッド）の
+        // WM_SETCURSOR に上書きされる。そのため、システムカーソル自体を
+        // 手のひらに置き換え、どのウィンドウの上でも手のひらを表示する。
+        // 矢印だけでなく Iビーム（キャレット）等も含めて置き換える。
+        foreach (uint cursorType in _cursorTypes)
+        {
+            IntPtr copy = CopyIcon(_moveCursorHandle);
+            if (copy != IntPtr.Zero)
+                SetSystemCursor(copy, cursorType);
+        }
+
+        _moveCursorApplied = true;
+    }
+
+    /// <summary>移動モード終了時にカーソルを標準の矢印へ戻す。</summary>
+    private static void RestoreMoveCursor()
+    {
+        if (!_moveCursorApplied) return;
+        _moveCursorApplied = false;
+
+        // システムカーソルをレジストリの設定から再読み込みして元に戻す
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, SPIF_SENDCHANGE);
     }
 
     // -----------------------------------------------------------------------
