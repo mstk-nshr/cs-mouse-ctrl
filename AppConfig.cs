@@ -46,6 +46,12 @@ static class AppConfig
     public static Keys TopmostKey { get; private set; } = Keys.T;
 
     /// <summary>
+    /// ウィンドウの Z-order を最背面（最下位）へ移動するキー（デフォルト B）。
+    /// config.toml の [hotkey] bottom_key に文字列で指定する。
+    /// </summary>
+    public static Keys BottomKey { get; private set; } = Keys.B;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -97,6 +103,10 @@ static class AppConfig
         # ウィンドウの最前面（Topmost）固定/解除をトグルするキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "T"
         topmost_key = "{KeysToString(TopmostKey)}"
+
+        # ウィンドウの Z-order を最背面（最下位）へ移動するキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "B"
+        bottom_key = "{KeysToString(BottomKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -216,6 +226,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         TopmostKey = k;
+                }
+                if (key == "bottom_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        BottomKey = k;
                 }
                 break;
 

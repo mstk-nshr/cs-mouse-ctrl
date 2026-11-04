@@ -8,6 +8,7 @@
 | Pause -> F11 | resize active window |
 | Pause -> F | fit active window to the largest free area |
 | Pause -> T | pin / unpin active window as topmost |
+| Pause -> B | send active window to the bottom of the Z-order |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -124,6 +125,15 @@ Pause -> F 押下
 - 切り替え時には、カーソル周辺にポップアップ通知が表示され、現在の状態を確認できます。
 
 
+### Window 最背面（Z-order 最下位）へ移動
+
+`Pause` キーを押して対象ウィンドウを選択後、`B` キーを押すことで、そのウィンドウの Z-order を最下位（最背面）へ移動させます。
+
+- 他のウィンドウの背後へ一時的に退避させたい場合に便利です。
+- 対象ウィンドウが最前面（TopMost）に固定されていた場合は、最前面固定が解除された上で最背面に移動します。
+- 実行時には、カーソル周辺にポップアップ通知が表示されます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -156,6 +166,10 @@ fit_key = "F"
 # 例: "T"
 topmost_key = "T"
 
+# ウィンドウの Z-order を最背面（最下位）へ移動するキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "B"
+bottom_key = "B"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
@@ -173,11 +187,12 @@ inner_spacing = 10
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
 | `[hotkey]` | `topmost_key` | 文字列 | `"T"` | ウィンドウの最前面（Topmost）固定/解除をトグルするキー |
+| `[hotkey]` | `bottom_key` | 文字列 | `"B"` | ウィンドウの Z-order を最背面（最下位）へ移動するキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 
 > [!NOTE]
-> `pause_key` / `resize_key` / `fit_key` / `topmost_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`）。
+> `pause_key` / `resize_key` / `fit_key` / `topmost_key` / `bottom_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`）。
 >
 > `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 

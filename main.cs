@@ -175,6 +175,7 @@ class Program
 
     private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     private static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
@@ -456,6 +457,24 @@ class Program
                         bool isTopmost = ToggleTopmost(target);
                         CancelNumpadWaiting();
                         TrayIcon.ShowMessage(isTopmost ? "最前面に固定しました (TopMost: ON)" : "最前面固定を解除しました (TopMost: OFF)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → bottom_key シーケンス: NumPad 待ち中に bottom_key が押されたら最下位（Z-order 最背面）へ移動
+                if (isKeyDown && (Keys)vkCode == AppConfig.BottomKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        CancelNumpadWaiting();
+                        SendToBottom(target);
+                        TrayIcon.ShowMessage("最背面に移動しました (Send to Bottom)", 1500);
                     }
                     else
                     {
@@ -882,6 +901,25 @@ class Program
             0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
         return makeTopmost;
+    }
+
+    /// <summary>
+    /// 対象ウィンドウの Z-order を最下位（最背面）へ移動する。
+    /// 最前面（TopMost）属性があれば解除した上で最背面に配置する。
+    /// </summary>
+    private static void SendToBottom(IntPtr target)
+    {
+        if (target == IntPtr.Zero || IsSystemWindow(target)) return;
+
+        // TopMost 属性があれば解除してから最背面へ配置
+        if ((GetWindowLong(target, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0)
+        {
+            SetWindowPos(target, HWND_NOTOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+
+        SetWindowPos(target, HWND_BOTTOM, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
     // メインロジック -------------------------------------------------------

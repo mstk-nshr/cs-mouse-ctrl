@@ -142,12 +142,14 @@ sealed class TrayIcon : IDisposable
         string resize = AppConfig.ResizeKey.ToString();
         string fit = AppConfig.FitKey.ToString();
         string topmost = AppConfig.TopmostKey.ToString();
+        string bottom = AppConfig.BottomKey.ToString();
 
         return
             $"{pause} → NumPad1..9: カーソル移動\n" +
             $"{pause} → {resize}, click, click: ウィンドウリサイズ\n" +
             $"{pause} → {fit}: 空きエリアへフィット\n" +
             $"{pause} → {topmost}: 最前面固定/解除\n" +
+            $"{pause} → {bottom}: 最背面へ移動\n" +
             $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
             $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
     }
