@@ -5,6 +5,7 @@
 | Key | Description |
 | --- | ----------- |
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
+| Pause -> M | move active window |
 | Pause -> F11 | resize active window |
 | Pause -> F | fit active window to the largest free area |
 | Pause -> T | pin / unpin active window as topmost |
@@ -82,6 +83,24 @@
 > [!NOTE]
 > - 高速移動中に画面端を超えようとした場合は、仮想スクリーンの端にクランプされます。
 > - キーを離すと即座に通常速度に戻ります。
+
+
+### Window Move 動作フロー
+
+```
+Pause -> M 押下
+  ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
+  ↓ ウィンドウ移動モード開始（マウス移動に伴い対象ウィンドウがリアルタイム追従）
+[移動決定]
+  マウスクリック（左クリック）、または Enter キー押下 → 現在位置で移動を決定・モード終了
+[移動キャンセル]
+  他の入力（Esc、その他のキー、右クリック等） → 移動前の位置に戻してモード終了
+```
+
+- `Pause` キーを押して対象ウィンドウを選択後、`M` キーを押すことでウィンドウ移動モードに入ります。
+- 移動モード中は、マウスの移動に伴い対象ウィンドウもリアルタイムに移動します。
+- **移動の決定**: マウスクリック（左クリック）または `Enter` キーを押すと、現在の位置で移動を確定して移動モードを終了します。
+- **移動のキャンセル**: それ以外の入力（`Esc` やその他のキー、右クリックなど）があった場合は、ウィンドウを移動前の位置に戻して移動モードを終了します。
 
 
 ### Resize-Active-Window 動作フロー
@@ -184,6 +203,10 @@ ctrl = 5
 # 例: "Pause", "F12", "ScrollLock"
 pause_key = "Pause"
 
+# ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "M"
+move_key = "M"
+
 # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "F11", "F10", "F9"
 resize_key = "F11"
@@ -226,6 +249,7 @@ inner_spacing = 10
 | `[speed_multiplier]` | `alt` | 整数 | `2` | Alt + マウス移動の速度倍率 |
 | `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
 | `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
+| `[hotkey]` | `move_key` | 文字列 | `"M"` | ウィンドウ移動モードのトリガーキー |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
 | `[hotkey]` | `topmost_key` | 文字列 | `"T"` | ウィンドウの最前面（Topmost）固定/解除をトグルするキー |

@@ -123,6 +123,12 @@ class Program
     private const int WM_MOUSEMOVE = 0x0200;
     private const int WM_LBUTTONDOWN = 0x0201;
     private const int WM_LBUTTONUP = 0x0202;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_RBUTTONUP = 0x0205;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_MBUTTONUP = 0x0208;
+    private const int WM_MOUSEWHEEL = 0x020A;
+    private const int WM_MOUSEHWHEEL = 0x020E;
     private const uint WM_CLOSE = 0x0010;
     private const uint GA_ROOT = 2;
     private const int LLKHF_EXTENDED = 0x01;
@@ -177,6 +183,19 @@ class Program
     private static POINT _resizeBottomRight;
     private static OverlayForm? _overlay;
 
+    // Window Move Mode ------------------------------------------------------
+
+    private static bool _isMoveMode;
+    private static IntPtr _moveTarget = IntPtr.Zero;
+    private static RECT _moveOriginalRect;
+    private static bool _moveWasZoomed;
+    private static POINT _moveStartMousePt;
+    private static int _lastAppliedMoveX;
+    private static int _lastAppliedMoveY;
+    private static bool _suppressNextLButtonUp;
+    private static bool _suppressNextRButtonUp;
+    private static bool _suppressNextMButtonUp;
+
     // Dim Overlay (Pause 押下時にデスクトップ全体を黒半透明で覆う) ----------
 
     private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
@@ -184,6 +203,7 @@ class Program
     private static readonly IntPtr HWND_BOTTOM = new IntPtr(1);
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
     private const int GWL_EXSTYLE = -20;
@@ -230,6 +250,7 @@ class Program
             if (_mouseHookID != IntPtr.Zero)
                 UnhookWindowsHookEx(_mouseHookID);
             _overlay?.Close();
+            CancelMoveMode();
             CloseDimOverlay();
             TrayIcon.CloseHelpPopup();
 
@@ -388,10 +409,34 @@ class Program
                 return (IntPtr)1;
             }
 
+            // ウィンドウ移動モード中のキー処理
+            if (_isMoveMode)
+            {
+                if (isKeyDown)
+                {
+                    if ((Keys)vkCode == Keys.Enter)
+                    {
+                        // Enterキー押下にて移動を決定
+                        CommitMoveMode();
+                    }
+                    else
+                    {
+                        // 他の入力があった場合は、移動前の位置に戻す
+                        CancelMoveMode();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+                else if (isKeyUp)
+                {
+                    return (IntPtr)1;
+                }
+            }
+
             // Pause キーの処理（NumPad待ちのトグル・キャンセル）
             if ((Keys)vkCode == AppConfig.PauseKey)
             {
-                if (isKeyDown && _resizePhase == ResizePhase.None)
+                if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode)
                 {
                     long now = Stopwatch.GetTimestamp();
                     if (_lastPauseTick == 0 || Stopwatch.GetElapsedTime(_lastPauseTick, now).TotalMilliseconds >= 150)
@@ -431,6 +476,16 @@ class Program
                         CancelNumpadWaiting();
                         _suppressNextKeyUp = (Keys)vkCode;
                     }
+                    return (IntPtr)1;
+                }
+
+                // pause_key → move_key シーケンス: NumPad 待ち中に move_key が押されたらウィンドウ移動モードへ
+                if (isKeyDown && (Keys)vkCode == AppConfig.MoveKey)
+                {
+                    IntPtr target = activeWindow;
+                    CancelNumpadWaiting();
+                    TryStartMoveMode(target);
+                    _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
 
@@ -551,6 +606,81 @@ class Program
     }
 
     // -----------------------------------------------------------------------
+    // Window Move Mode
+    // -----------------------------------------------------------------------
+
+    private static void TryStartMoveMode(IntPtr preferredTarget = default)
+    {
+        // 既に移動モードまたはリサイズモード中なら無視
+        if (_isMoveMode || _resizePhase != ResizePhase.None) return;
+
+        IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
+
+        if (_isWaitingForNumpad)
+            CancelNumpadWaiting();
+
+        if (target == IntPtr.Zero)
+            target = GetForegroundWindow();
+
+        if (target == IntPtr.Zero) return;
+        IntPtr rootWnd = GetAncestor(target, GA_ROOT);
+        if (rootWnd == IntPtr.Zero) rootWnd = target;
+
+        // デスクトップ・タスクバーは除外
+        if (IsSystemWindow(rootWnd)) return;
+
+        if (!GetWindowRect(rootWnd, out RECT rect)) return;
+        if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return;
+
+        if (!GetCursorPos(out POINT cursorPt)) return;
+
+        // 最大化されている場合は復元してから移動する
+        bool wasZoomed = IsZoomed(rootWnd);
+        if (wasZoomed)
+        {
+            ShowWindow(rootWnd, SW_RESTORE);
+            if (!GetWindowRect(rootWnd, out rect)) return;
+        }
+
+        SetForegroundWindow(rootWnd);
+
+        _moveTarget = rootWnd;
+        _moveOriginalRect = rect;
+        _moveWasZoomed = wasZoomed;
+        _moveStartMousePt = cursorPt;
+        _lastAppliedMoveX = rect.Left;
+        _lastAppliedMoveY = rect.Top;
+        _isMoveMode = true;
+    }
+
+    private static void CommitMoveMode()
+    {
+        if (!_isMoveMode) return;
+        _isMoveMode = false;
+        _moveTarget = IntPtr.Zero;
+    }
+
+    private static void CancelMoveMode()
+    {
+        if (!_isMoveMode) return;
+        _isMoveMode = false;
+        if (_moveTarget != IntPtr.Zero)
+        {
+            if (_moveWasZoomed)
+            {
+                ShowWindow(_moveTarget, SW_MAXIMIZE);
+            }
+            else
+            {
+                SetWindowPos(_moveTarget, IntPtr.Zero,
+                    _moveOriginalRect.Left, _moveOriginalRect.Top, 0, 0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            _moveTarget = IntPtr.Zero;
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Window Resize Mode
     // -----------------------------------------------------------------------
 
@@ -569,8 +699,8 @@ class Program
 
     private static void TryStartResizeMode(IntPtr preferredTarget = default)
     {
-        // 既にリサイズモード中なら無視
-        if (_resizePhase != ResizePhase.None) return;
+        // 既にリサイズモード中または移動モード中なら無視
+        if (_resizePhase != ResizePhase.None || _isMoveMode) return;
 
         IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
 
@@ -636,10 +766,27 @@ class Program
             MSLLHOOKSTRUCT ms = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
             int msg = wParam.ToInt32();
 
+            // 移動モード終了時の UP イベント抑制
+            if (msg == WM_LBUTTONUP && _suppressNextLButtonUp)
+            {
+                _suppressNextLButtonUp = false;
+                return (IntPtr)1;
+            }
+            if (msg == WM_RBUTTONUP && _suppressNextRButtonUp)
+            {
+                _suppressNextRButtonUp = false;
+                return (IntPtr)1;
+            }
+            if (msg == WM_MBUTTONUP && _suppressNextMButtonUp)
+            {
+                _suppressNextMButtonUp = false;
+                return (IntPtr)1;
+            }
+
             if (msg == WM_MOUSEMOVE)
             {
-                // --- 高速移動 (Resize Mode 外のみ) ---
-                if (_resizePhase == ResizePhase.None)
+                // --- 高速移動 (Resize Mode, Move Mode 外のみ) ---
+                if (_resizePhase == ResizePhase.None && !_isMoveMode)
                 {
                     bool altDown  = leftAltPressed  || rightAltPressed;
                     bool ctrlDown = leftCtrlPressed || rightCtrlPressed;
@@ -704,6 +851,31 @@ class Program
                         UpdateOverlay();
                     }
                 }
+
+                // --- Window Move Mode ---
+                if (_isMoveMode)
+                {
+                    if (!GetWindowRect(_moveTarget, out RECT _))
+                    {
+                        _isMoveMode = false;
+                        _moveTarget = IntPtr.Zero;
+                    }
+                    else
+                    {
+                        int dx = ms.pt.X - _moveStartMousePt.X;
+                        int dy = ms.pt.Y - _moveStartMousePt.Y;
+                        int newX = _moveOriginalRect.Left + dx;
+                        int newY = _moveOriginalRect.Top + dy;
+
+                        if (newX != _lastAppliedMoveX || newY != _lastAppliedMoveY)
+                        {
+                            _lastAppliedMoveX = newX;
+                            _lastAppliedMoveY = newY;
+                            SetWindowPos(_moveTarget, IntPtr.Zero, newX, newY, 0, 0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                        }
+                    }
+                }
             }
             else if (_resizePhase != ResizePhase.None)
             {
@@ -735,6 +907,29 @@ class Program
                 {
                     // 左クリック以外のマウスイベント（右クリック・ホイール等）→ モード終了
                     CancelResizeMode();
+                }
+            }
+            else if (_isMoveMode)
+            {
+                if (msg == WM_LBUTTONDOWN)
+                {
+                    // マウスクリックにて移動を決定
+                    CommitMoveMode();
+                    _suppressNextLButtonUp = true;
+                    return (IntPtr)1;
+                }
+                else if (msg == WM_LBUTTONUP)
+                {
+                    return (IntPtr)1;
+                }
+                else
+                {
+                    // 他の入力（右クリック、中クリック、ホイール等）があった場合は、移動前の位置に戻す
+                    if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                    else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
+
+                    CancelMoveMode();
+                    return (IntPtr)1;
                 }
             }
         }

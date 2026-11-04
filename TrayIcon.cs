@@ -139,6 +139,7 @@ sealed class TrayIcon : IDisposable
     private static string BuildHelpText()
     {
         string pause = AppConfig.PauseKey.ToString();
+        string move = AppConfig.MoveKey.ToString();
         string resize = AppConfig.ResizeKey.ToString();
         string fit = AppConfig.FitKey.ToString();
         string topmost = AppConfig.TopmostKey.ToString();
@@ -149,6 +150,7 @@ sealed class TrayIcon : IDisposable
 
         return
             $"{pause} → NumPad1..9: カーソル移動\n" +
+            $"{pause} → {move}: ウィンドウ移動\n" +
             $"{pause} → {resize}, click, click: ウィンドウリサイズ\n" +
             $"{pause} → {fit}: 空きエリアへフィット\n" +
             $"{pause} → {topmost}: 最前面固定/解除\n" +

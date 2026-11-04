@@ -28,6 +28,12 @@ static class AppConfig
     public static Keys PauseKey { get; private set; } = Keys.Pause;
 
     /// <summary>
+    /// ウィンドウ移動モードを起動するトリガーキー（デフォルト M）。
+    /// config.toml の [hotkey] move_key に文字列で指定する。
+    /// </summary>
+    public static Keys MoveKey { get; private set; } = Keys.M;
+
+    /// <summary>
     /// ウィンドウリサイズモードを起動するトリガーキー（デフォルト F11）。
     /// config.toml の [hotkey] resize_key に文字列で指定する。
     /// </summary>
@@ -109,6 +115,10 @@ static class AppConfig
         # NumPad 待ち受けを起動するキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "Pause", "F12", "ScrollLock"
         pause_key = "{KeysToString(PauseKey)}"
+
+        # ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "M"
+        move_key = "{KeysToString(MoveKey)}"
 
         # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "F11", "F10", "F9"
@@ -238,6 +248,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         PauseKey = k;
+                }
+                if (key == "move_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        MoveKey = k;
                 }
                 if (key == "resize_key")
                 {
