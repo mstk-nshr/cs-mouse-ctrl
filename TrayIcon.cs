@@ -84,6 +84,18 @@ sealed class TrayIcon : IDisposable
     }
 
     /// <summary>
+    /// 任意のメッセージをカーソル周辺にポップアップ表示する。
+    /// </summary>
+    internal static void ShowMessage(string text, int durationMs = 1500)
+    {
+        CloseHelpPopup();
+        _helpPopup = new HelpPopupForm(text, autoClose: true, durationMs: durationMs);
+        _helpPopup.FormClosed += (_, _) => _helpPopup = null;
+        _helpPopup.Show();
+        _helpPopup.BringToTopMost();
+    }
+
+    /// <summary>
     /// 表示中のヘルプポップアップを閉じる。
     /// </summary>
     internal static void CloseHelpPopup()
@@ -129,11 +141,13 @@ sealed class TrayIcon : IDisposable
         string pause = AppConfig.PauseKey.ToString();
         string resize = AppConfig.ResizeKey.ToString();
         string fit = AppConfig.FitKey.ToString();
+        string topmost = AppConfig.TopmostKey.ToString();
 
         return
             $"{pause} → NumPad1..9: カーソル移動\n" +
             $"{pause} → {resize}, click, click: ウィンドウリサイズ\n" +
             $"{pause} → {fit}: 空きエリアへフィット\n" +
+            $"{pause} → {topmost}: 最前面固定/解除\n" +
             $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
             $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
     }
@@ -221,7 +235,7 @@ sealed class TrayIcon : IDisposable
 
         protected override bool ShowWithoutActivation => true;
 
-        public HelpPopupForm(string text, bool autoClose = true)
+        public HelpPopupForm(string text, bool autoClose = true, int durationMs = 5000)
         {
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -256,7 +270,7 @@ sealed class TrayIcon : IDisposable
             if (autoClose)
             {
                 // 一定時間で自動的に閉じる
-                _closeTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+                _closeTimer = new System.Windows.Forms.Timer { Interval = durationMs };
                 _closeTimer.Tick += (_, _) => Close();
                 _closeTimer.Start();
             }

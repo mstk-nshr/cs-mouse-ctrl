@@ -40,6 +40,12 @@ static class AppConfig
     public static Keys FitKey { get; private set; } = Keys.F;
 
     /// <summary>
+    /// ウィンドウの最前面（Topmost）固定/解除をトグルするキー（デフォルト T）。
+    /// config.toml の [hotkey] topmost_key に文字列で指定する。
+    /// </summary>
+    public static Keys TopmostKey { get; private set; } = Keys.T;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -87,6 +93,10 @@ static class AppConfig
         # ウィンドウを空きエリアへフィットさせるキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "F", "F8"
         fit_key = "{KeysToString(FitKey)}"
+
+        # ウィンドウの最前面（Topmost）固定/解除をトグルするキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "T"
+        topmost_key = "{KeysToString(TopmostKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -200,6 +210,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         FitKey = k;
+                }
+                if (key == "topmost_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        TopmostKey = k;
                 }
                 break;
 

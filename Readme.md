@@ -7,6 +7,7 @@
 | Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
 | Pause -> F11 | resize active window |
 | Pause -> F | fit active window to the largest free area |
+| Pause -> T | pin / unpin active window as topmost |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -114,6 +115,15 @@ Pause -> F 押下
 - 他のウィンドウは `inner_spacing` 分だけ外側に拡張した領域として扱われるため、移動後のウィンドウとの間に必ず `inner_spacing` 以上の間隔が空きます。
 
 
+### Window Topmost 固定 / 解除
+
+`Pause` キーを押して対象ウィンドウを選択後、`T` キーを押すことで、そのウィンドウの「最前面表示（TopMost）」の固定と解除をトグル切り替えできます。
+
+- 固定されたウィンドウは、他のウィンドウを操作しても背面に隠れず最前面に表示され続けます。
+- 再度 `Pause -> T` を押すと固定が解除され、通常のウィンドウ表示に戻ります。
+- 切り替え時には、カーソル周辺にポップアップ通知が表示され、現在の状態を確認できます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -142,6 +152,10 @@ resize_key = "F11"
 # 例: "F", "F8"
 fit_key = "F"
 
+# ウィンドウの最前面（Topmost）固定/解除をトグルするキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "T"
+topmost_key = "T"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
@@ -158,11 +172,12 @@ inner_spacing = 10
 | `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
+| `[hotkey]` | `topmost_key` | 文字列 | `"T"` | ウィンドウの最前面（Topmost）固定/解除をトグルするキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 
 > [!NOTE]
-> `pause_key` / `resize_key` / `fit_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`）。
+> `pause_key` / `resize_key` / `fit_key` / `topmost_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`）。
 >
 > `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 
@@ -212,4 +227,3 @@ h:\prj\cs-mouse-ctrl\bin\Release\net9.0-windows\win-x64\publish\cs-mouse-ctrl.ex
 ### Pause -> ? to display the window process information
 
 ### Pause -> Tab to switch the target window
-

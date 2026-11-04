@@ -446,6 +446,24 @@ class Program
                     _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
+
+                // pause_key → topmost_key シーケンス: NumPad 待ち中に topmost_key が押されたら最前面固定/解除
+                if (isKeyDown && (Keys)vkCode == AppConfig.TopmostKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        bool isTopmost = ToggleTopmost(target);
+                        CancelNumpadWaiting();
+                        TrayIcon.ShowMessage(isTopmost ? "最前面に固定しました (TopMost: ON)" : "最前面固定を解除しました (TopMost: OFF)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
             }
         }
 
@@ -842,6 +860,28 @@ class Program
             bestRight = right;
             bestBottom = bottom;
         }
+    }
+
+    /// <summary>
+    /// 対象ウィンドウの最前面（TopMost）固定・解除をトグルする。
+    /// トグル後の最前面状態（true: 最前面固定, false: 解除）を返す。
+    /// </summary>
+    private static bool ToggleTopmost(IntPtr target)
+    {
+        if (target == IntPtr.Zero || IsSystemWindow(target)) return false;
+
+        bool currentlyTopmost = _dimTarget == target
+            ? _dimTargetWasTopMost
+            : (GetWindowLong(target, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+
+        bool makeTopmost = !currentlyTopmost;
+        if (_dimTarget == target)
+            _dimTargetWasTopMost = makeTopmost;
+
+        SetWindowPos(target, makeTopmost ? HWND_TOPMOST : HWND_NOTOPMOST,
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+        return makeTopmost;
     }
 
     // メインロジック -------------------------------------------------------
