@@ -84,6 +84,9 @@ class Program
     [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    [DllImport("user32.dll")]
+    static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
 
@@ -120,8 +123,11 @@ class Program
     private const int WM_MOUSEMOVE = 0x0200;
     private const int WM_LBUTTONDOWN = 0x0201;
     private const int WM_LBUTTONUP = 0x0202;
+    private const uint WM_CLOSE = 0x0010;
     private const uint GA_ROOT = 2;
     private const int LLKHF_EXTENDED = 0x01;
+    private const int SW_MAXIMIZE = 3;
+    private const int SW_MINIMIZE = 6;
     private const int SW_RESTORE = 9;
     private const int DWMWA_CLOAKED = 14;
     private const int KEYEVENTF_KEYUP = 0x0002;
@@ -475,6 +481,61 @@ class Program
                         CancelNumpadWaiting();
                         SendToBottom(target);
                         TrayIcon.ShowMessage("最背面に移動しました (Send to Bottom)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → minimize_key シーケンス: NumPad 待ち中に minimize_key が押されたら最小化
+                if (isKeyDown && (Keys)vkCode == AppConfig.MinimizeKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        CancelNumpadWaiting();
+                        ShowWindow(target, SW_MINIMIZE);
+                        TrayIcon.ShowMessage("最小化しました (Minimize)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → maximize_key シーケンス: NumPad 待ち中に maximize_key が押されたら最大化（トグル）
+                if (isKeyDown && (Keys)vkCode == AppConfig.MaximizeKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        CancelNumpadWaiting();
+                        bool wasZoomed = IsZoomed(target);
+                        ShowWindow(target, wasZoomed ? SW_RESTORE : SW_MAXIMIZE);
+                        TrayIcon.ShowMessage(wasZoomed ? "元のサイズに戻しました (Restore)" : "最大化しました (Maximize)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → close_key シーケンス: NumPad 待ち中に close_key が押されたらウィンドウを閉じる
+                if (isKeyDown && (Keys)vkCode == AppConfig.CloseKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        CancelNumpadWaiting();
+                        PostMessage(target, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                        TrayIcon.ShowMessage("ウィンドウを閉じました (Close)", 1500);
                     }
                     else
                     {

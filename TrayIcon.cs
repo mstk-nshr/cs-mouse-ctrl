@@ -143,6 +143,9 @@ sealed class TrayIcon : IDisposable
         string fit = AppConfig.FitKey.ToString();
         string topmost = AppConfig.TopmostKey.ToString();
         string bottom = AppConfig.BottomKey.ToString();
+        string minimize = AppConfig.MinimizeKey.ToString();
+        string maximize = AppConfig.MaximizeKey.ToString();
+        string close = AppConfig.CloseKey.ToString();
 
         return
             $"{pause} → NumPad1..9: カーソル移動\n" +
@@ -150,6 +153,9 @@ sealed class TrayIcon : IDisposable
             $"{pause} → {fit}: 空きエリアへフィット\n" +
             $"{pause} → {topmost}: 最前面固定/解除\n" +
             $"{pause} → {bottom}: 最背面へ移動\n" +
+            $"{pause} → {minimize}: 最小化\n" +
+            $"{pause} → {maximize}: 最大化\n" +
+            $"{pause} → {close}: ウィンドウを閉じる\n" +
             $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
             $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
     }

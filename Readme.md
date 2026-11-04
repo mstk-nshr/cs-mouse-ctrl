@@ -9,6 +9,9 @@
 | Pause -> F | fit active window to the largest free area |
 | Pause -> T | pin / unpin active window as topmost |
 | Pause -> B | send active window to the bottom of the Z-order |
+| Pause -> I | minimize active window |
+| Pause -> A | maximize / restore active window |
+| Pause -> X | close active window |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -148,6 +151,19 @@ Pause -> B 押下
 - 実行時には、カーソル周辺に「最背面に移動しました (Send to Bottom)」のポップアップ通知が約 1.5 秒間表示されます。
 
 
+### Window 最小化 / 最大化 / 閉じる
+
+`Pause` キーを押して対象ウィンドウを選択後、以下のキーでウィンドウ操作を行えます。
+
+| キー | 動作 | 説明 |
+| :--- | :--- | :--- |
+| **Pause -> I** | 最小化 | 対象ウィンドウを最小化します（タスクバーへ格納）。 |
+| **Pause -> A** | 最大化 / 元に戻す | 対象ウィンドウを最大化します（すでに最大化されている場合は元の通常サイズに戻します）。 |
+| **Pause -> X** | ウィンドウを閉じる | 対象ウィンドウへ `WM_CLOSE` を送信して閉じます（未保存ファイルがある場合は通常の保存確認が出ます）。 |
+
+各操作の実行時には、カーソル周辺にポップアップ通知が表示されます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -184,6 +200,18 @@ topmost_key = "T"
 # 例: "B"
 bottom_key = "B"
 
+# 対象ウィンドウを最小化するキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "I"
+minimize_key = "I"
+
+# 対象ウィンドウを最大化するキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "A"
+maximize_key = "A"
+
+# 対象ウィンドウを閉じるキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "X"
+close_key = "X"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
@@ -202,11 +230,14 @@ inner_spacing = 10
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
 | `[hotkey]` | `topmost_key` | 文字列 | `"T"` | ウィンドウの最前面（Topmost）固定/解除をトグルするキー |
 | `[hotkey]` | `bottom_key` | 文字列 | `"B"` | ウィンドウの Z-order を最背面（最下位）へ移動するキー |
+| `[hotkey]` | `minimize_key` | 文字列 | `"I"` | 対象ウィンドウを最小化するキー |
+| `[hotkey]` | `maximize_key` | 文字列 | `"A"` | 対象ウィンドウを最大化するキー |
+| `[hotkey]` | `close_key` | 文字列 | `"X"` | 対象ウィンドウを閉じるキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 
 > [!NOTE]
-> `pause_key` / `resize_key` / `fit_key` / `topmost_key` / `bottom_key` には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`）。
+> 各ホットキー設定には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`, `"I"`, `"A"`, `"X"`）。
 >
 > `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 
@@ -250,8 +281,6 @@ h:\prj\cs-mouse-ctrl\bin\Release\net9.0-windows\win-x64\publish\cs-mouse-ctrl.ex
 > バックグラウンドで常駐するツールです。タスクトレイのアイコンを右クリックして **停止** を選ぶと終了できます。また、新しいインスタンスを起動すると既存インスタンスが自動終了します（後優先の仕様）。
 
 ## TODO
-
-### Pause -> F4 to close the window
 
 ### Pause -> ? to display the window process information
 

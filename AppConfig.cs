@@ -52,6 +52,24 @@ static class AppConfig
     public static Keys BottomKey { get; private set; } = Keys.B;
 
     /// <summary>
+    /// 対象ウィンドウを最小化するキー（デフォルト I）。
+    /// config.toml の [hotkey] minimize_key に文字列で指定する。
+    /// </summary>
+    public static Keys MinimizeKey { get; private set; } = Keys.I;
+
+    /// <summary>
+    /// 対象ウィンドウを最大化（トグル）するキー（デフォルト A）。
+    /// config.toml の [hotkey] maximize_key に文字列で指定する。
+    /// </summary>
+    public static Keys MaximizeKey { get; private set; } = Keys.A;
+
+    /// <summary>
+    /// 対象ウィンドウを閉じるキー（デフォルト X）。
+    /// config.toml の [hotkey] close_key に文字列で指定する。
+    /// </summary>
+    public static Keys CloseKey { get; private set; } = Keys.X;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -107,6 +125,18 @@ static class AppConfig
         # ウィンドウの Z-order を最背面（最下位）へ移動するキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "B"
         bottom_key = "{KeysToString(BottomKey)}"
+
+        # 対象ウィンドウを最小化するキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "I"
+        minimize_key = "{KeysToString(MinimizeKey)}"
+
+        # 対象ウィンドウを最大化するキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "A"
+        maximize_key = "{KeysToString(MaximizeKey)}"
+
+        # 対象ウィンドウを閉じるキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "X"
+        close_key = "{KeysToString(CloseKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -232,6 +262,24 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         BottomKey = k;
+                }
+                if (key == "minimize_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        MinimizeKey = k;
+                }
+                if (key == "maximize_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        MaximizeKey = k;
+                }
+                if (key == "close_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        CloseKey = k;
                 }
                 break;
 
