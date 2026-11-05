@@ -138,7 +138,8 @@ sealed class TrayIcon : IDisposable
     /// </summary>
     private static string BuildHelpText()
     {
-        string pause = AppConfig.PauseKey.ToString();
+        // config.toml の hotkey 配列に列挙されたキーをまとめて表示する
+        string pause = AppConfig.PauseKeysDisplay;
         string move = AppConfig.MoveKey.ToString();
         string resize = AppConfig.ResizeKey.ToString();
         string fit = AppConfig.FitKey.ToString();

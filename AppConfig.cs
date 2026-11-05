@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 /// <summary>
@@ -22,10 +24,19 @@ static class AppConfig
     public static int CtrlMultiplier { get; private set; } = 5;
 
     /// <summary>
-    /// NumPad 待ち受けを開始するキー（デフォルト Pause）。
-    /// config.toml の [hotkey] pause_key に文字列で指定する。
+    /// NumPad 待ち受けを開始するキーの一覧（デフォルト Pause, Break）。
+    /// config.toml の [hotkey] hotkey に文字列配列で指定する。
+    /// "Break" は Ctrl+Break が生成する VK_CANCEL に対応する。
     /// </summary>
-    public static Keys PauseKey { get; private set; } = Keys.Pause;
+    public static Keys[] PauseKeys { get; private set; } = { Keys.Pause, Keys.Cancel };
+
+    /// <summary>待ち受けキーの表示用文字列（例: "Pause/Break"）。</summary>
+    public static string PauseKeysDisplay =>
+        string.Join("/", PauseKeys.Select(KeysToConfigName));
+
+    /// <summary>待ち受けキーの config.toml 用配列文字列（例: ["Pause", "Break"]）。</summary>
+    private static string PauseKeysToml =>
+        "[" + string.Join(", ", PauseKeys.Select(k => $"\"{KeysToConfigName(k)}\"")) + "]";
 
     /// <summary>
     /// ウィンドウ移動モードを起動するトリガーキー（デフォルト M）。
@@ -112,9 +123,10 @@ static class AppConfig
         ctrl = {CtrlMultiplier}
 
         [hotkey]
-        # NumPad 待ち受けを起動するキー名（Windows Forms の Keys 列挙体の名前）
-        # 例: "Pause", "F12", "ScrollLock"
-        pause_key = "{KeysToString(PauseKey)}"
+        # NumPad 待ち受けを起動するキー名の配列（Windows Forms の Keys 列挙体の名前）
+        # 例: ["Pause", "Break"], ["F12"], ["ScrollLock"]
+        # "Break" は Ctrl+Break に対応します。
+        hotkey = {PauseKeysToml}
 
         # ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "M"
@@ -243,11 +255,17 @@ static class AppConfig
                 break;
 
             case "hotkey":
+                if (key == "hotkey")
+                {
+                    if (TryParseKeysArray(value, out Keys[] keys) && keys.Length > 0)
+                        PauseKeys = keys;
+                }
+                // 後方互換: 旧 pause_key（単一キー）
                 if (key == "pause_key")
                 {
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
-                        PauseKey = k;
+                        PauseKeys = new[] { k };
                 }
                 if (key == "move_key")
                 {
@@ -341,7 +359,40 @@ static class AppConfig
 
     private static bool TryParseKeys(string name, out Keys key)
     {
+        // "Break" は Windows Forms の Keys 列挙体に存在しないため、
+        // Ctrl+Break が生成する VK_CANCEL（Keys.Cancel）へ対応付ける。
+        if (string.Equals(name, "Break", StringComparison.OrdinalIgnoreCase))
+        {
+            key = Keys.Cancel;
+            return true;
+        }
         return Enum.TryParse(name, ignoreCase: true, out key);
+    }
+
+    /// <summary>"[\"Pause\", \"Break\"]" → Keys[] { Keys.Pause, Keys.Cancel }</summary>
+    private static bool TryParseKeysArray(string s, out Keys[] result)
+    {
+        result = Array.Empty<Keys>();
+        s = s.Trim();
+        if (s.Length < 2 || s[0] != '[' || s[^1] != ']')
+            return false;
+
+        string inner = s[1..^1];
+        string[] parts = inner.Split(',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            return false;
+
+        var keys = new List<Keys>(parts.Length);
+        foreach (string part in parts)
+        {
+            if (!TryParseKeys(UnquoteString(part), out Keys k))
+                return false;
+            keys.Add(k);
+        }
+
+        result = keys.ToArray();
+        return true;
     }
 
     /// <summary>"[10, 10, 10, 10]" → int[] { 10, 10, 10, 10 }</summary>
@@ -370,5 +421,9 @@ static class AppConfig
     }
 
     private static string KeysToString(Keys k) => k.ToString();
+
+    /// <summary>Keys を config.toml 用のキー名へ変換する（Break は "Break"）。</summary>
+    private static string KeysToConfigName(Keys k) =>
+        k == Keys.Cancel ? "Break" : k.ToString();
 }
 

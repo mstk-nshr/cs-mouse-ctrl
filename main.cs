@@ -547,8 +547,8 @@ class Program
                 }
             }
 
-            // Pause キーの処理（NumPad待ちのトグル・キャンセル）
-            if ((Keys)vkCode == AppConfig.PauseKey)
+            // Pause / Break キーの処理（NumPad待ちのトグル・キャンセル）
+            if (IsPauseOrBreakKey((Keys)vkCode))
             {
                 if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode)
                 {
@@ -1524,6 +1524,16 @@ class Program
     }
 
     // メインロジック -------------------------------------------------------
+
+    /// <summary>
+    /// NumPad 待ち受けを起動するキーかどうかを判定する。
+    /// config.toml の [hotkey] hotkey に列挙されたキー
+    /// （既定は Pause と Break）のいずれかであれば true を返す。
+    /// </summary>
+    private static bool IsPauseOrBreakKey(Keys key)
+    {
+        return Array.IndexOf(AppConfig.PauseKeys, key) >= 0;
+    }
 
     private static void StartNumpadWaiting()
     {

@@ -4,15 +4,15 @@
 
 | Key | Description |
 | --- | ----------- |
-| Pause -> Numpad1..9 | move mouse pointer (window 9-positions, Pause again to cancel) |
-| Pause -> M | move active window |
-| Pause -> F11 | resize active window |
-| Pause -> F | fit active window to the largest free area |
-| Pause -> T | pin / unpin active window as topmost |
-| Pause -> B | send active window to the bottom of the Z-order |
-| Pause -> I | minimize active window |
-| Pause -> A | maximize / restore active window |
-| Pause -> X | close active window |
+| Pause/Break -> Numpad1..9 | move mouse pointer (window 9-positions, Pause/Break again to cancel) |
+| Pause/Break -> M | move active window |
+| Pause/Break -> F11 | resize active window |
+| Pause/Break -> F | fit active window to the largest free area |
+| Pause/Break -> T | pin / unpin active window as topmost |
+| Pause/Break -> B | send active window to the bottom of the Z-order |
+| Pause/Break -> I | minimize active window |
+| Pause/Break -> A | maximize / restore active window |
+| Pause/Break -> X | close active window |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -31,14 +31,14 @@
 
 ### move-mouse-pointer 
 
-`Pause` キーを押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
+`Pause` キーまたは `Break` キー（`Ctrl+Break`）を押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
 
-- **Pauseキー方式（モーダル入力）**:
-  - `Pause` キーを押すと、**デスクトップ全体が黒色半透明の矩形で覆われ**、対象ウィンドウがその手前（最前面）に表示され、**カーソル周辺にポップアップヘルプ**が表示されます。
+- **Pause/Breakキー方式（モーダル入力）**:
+  - `Pause` キーまたは `Break` キー（`Ctrl+Break`）を押すと、**デスクトップ全体が黒色半透明の矩形で覆われ**、対象ウィンドウがその手前（最前面）に表示され、**カーソル周辺にポップアップヘルプ**が表示されます。
   - そのままテンキー待ち状態に入り、カーソルが対象ウィンドウ内に固定されます。
   - 続けて `NumPad 1〜9` を押すと該当位置へカーソルが移動し、待ち状態が終了します（ポップアップヘルプも閉じます）。
-  - 待ち状態中にもう一度 `Pause` キー（または `Esc` キー）を押すと、移動を行わずにテンキー待ちをキャンセルします（ポップアップヘルプも閉じます）。
-  - キー入力の処理が終わる（またはキャンセルする）と、黒色半透明の矩形およびポップアップヘルプは自動的に削除され、対象ウィンドウの最前面状態も元に戻ります。その後は次の `Pause` キー入力を待ちます。
+  - 待ち状態中にもう一度 `Pause` キーまたは `Break` キー（あるいは `Esc` キー）を押すと、移動を行わずにテンキー待ちをキャンセルします（ポップアップヘルプも閉じます）。
+  - キー入力の処理が終わる（またはキャンセルする）と、黒色半透明の矩形およびポップアップヘルプは自動的に削除され、対象ウィンドウの最前面状態も元に戻ります。その後は次の `Pause` / `Break` キー入力を待ちます。
 
 #### テンキー配置と移動位置の対応
 
@@ -200,9 +200,10 @@ alt = 2
 ctrl = 5
 
 [hotkey]
-# NumPad 待ち受けを起動するキー名（Windows Forms の Keys 列挙体の名前）
-# 例: "Pause", "F12", "ScrollLock"
-pause_key = "Pause"
+# NumPad 待ち受けを起動するキー名の配列（Windows Forms の Keys 列挙体の名前）
+# 例: ["Pause", "Break"], ["F12"], ["ScrollLock"]
+# "Break" は Ctrl+Break に対応します。
+hotkey = ["Pause", "Break"]
 
 # ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "M"
@@ -249,7 +250,7 @@ inner_spacing = 10
 | :--- | :--- | :--- | :--- | :--- |
 | `[speed_multiplier]` | `alt` | 整数 | `2` | Alt + マウス移動の速度倍率 |
 | `[speed_multiplier]` | `ctrl` | 整数 | `5` | Ctrl + マウス移動の速度倍率 |
-| `[hotkey]` | `pause_key` | 文字列 | `"Pause"` | NumPad 待ち受けを起動するキー名 |
+| `[hotkey]` | `hotkey` | 文字列配列 | `["Pause", "Break"]` | NumPad 待ち受けを起動するキー名の配列 |
 | `[hotkey]` | `move_key` | 文字列 | `"M"` | ウィンドウ移動モードのトリガーキー |
 | `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
@@ -263,6 +264,8 @@ inner_spacing = 10
 
 > [!NOTE]
 > 各ホットキー設定には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`, `"I"`, `"A"`, `"X"`）。
+>
+> `hotkey` は配列で指定し、複数のキーを登録できます。`"Break"` は `Ctrl+Break` に対応します（内部的には `Keys.Cancel`）。旧形式の `pause_key = "Pause"` も後方互換のため引き続き読み込まれます。
 >
 > `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 
