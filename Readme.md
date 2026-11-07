@@ -13,6 +13,7 @@
 | Pause/Break -> I | minimize active window |
 | Pause/Break -> A | maximize / restore active window |
 | Pause/Break -> X | close active window |
+| Pause/Break -> S | snap active window to grid position |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -184,6 +185,23 @@ Pause -> B 押下
 各操作の実行時には、カーソル周辺にポップアップ通知が表示されます。
 
 
+### Window Snap 動作フロー
+
+```
+Pause -> S 押下
+  ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
+  ↓ スナップ選択 UI（1x1〜4x4 グリッド一覧）を表示
+[選択]
+  グリッドにマウスをホバー → アクセントカラーでハイライト
+  左クリック → 選択したグリッドサイズに合わせてウィンドウを移動・リサイズ
+[キャンセル]
+  Rect 外クリック、または任意のキー入力 → キャンセルして UI を閉じる
+```
+
+- `outer_spacing` と `inner_spacing` を考慮した配置位置で `MoveWindow()` を実行します。
+- 最大化されていた場合は復元してからスナップします。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -259,6 +277,7 @@ inner_spacing = 10
 | `[hotkey]` | `minimize_key` | 文字列 | `"I"` | 対象ウィンドウを最小化するキー |
 | `[hotkey]` | `maximize_key` | 文字列 | `"A"` | 対象ウィンドウを最大化するキー |
 | `[hotkey]` | `close_key` | 文字列 | `"X"` | 対象ウィンドウを閉じるキー |
+| `[hotkey]` | `snap_key` | 文字列 | `"S"` | ウィンドウスナップ選択 UI を起動するキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 

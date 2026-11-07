@@ -87,6 +87,12 @@ static class AppConfig
     public static Keys CloseKey { get; private set; } = Keys.X;
 
     /// <summary>
+    /// ウィンドウスナップ選択 UI を起動するトリガーキー（デフォルト S）。
+    /// config.toml の [hotkey] snap_key に文字列で指定する。
+    /// </summary>
+    public static Keys SnapKey { get; private set; } = Keys.S;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -159,6 +165,10 @@ static class AppConfig
         # 対象ウィンドウを閉じるキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "X"
         close_key = "{KeysToString(CloseKey)}"
+
+        # ウィンドウスナップ選択 UI を起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "S"
+        snap_key = "{KeysToString(SnapKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -314,6 +324,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         CloseKey = k;
+                }
+                if (key == "snap_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        SnapKey = k;
                 }
                 break;
 

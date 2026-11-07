@@ -148,6 +148,7 @@ sealed class TrayIcon : IDisposable
         string minimize = AppConfig.MinimizeKey.ToString();
         string maximize = AppConfig.MaximizeKey.ToString();
         string close = AppConfig.CloseKey.ToString();
+        string snap  = AppConfig.SnapKey.ToString();
 
         return
             $"{pause} → NumPad1..9: カーソル移動\n" +
@@ -159,6 +160,7 @@ sealed class TrayIcon : IDisposable
             $"{pause} → {minimize}: 最小化\n" +
             $"{pause} → {maximize}: 最大化\n" +
             $"{pause} → {close}: ウィンドウを閉じる\n" +
+            $"{pause} → {snap}: スナップ選択 UI\n" +
             $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
             $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
     }

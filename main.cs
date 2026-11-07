@@ -317,6 +317,11 @@ class Program
     private static IntPtr _dimTarget = IntPtr.Zero;
     private static bool _dimTargetWasTopMost;
 
+    // Window Snap Mode -------------------------------------------------------
+
+    private static WindowSnapForm? _snapForm;
+    private static IntPtr _snapTarget = IntPtr.Zero;
+
     static void Main()
     {
         // 設定ファイルを読み込む（存在しない場合は自動生成）
@@ -359,6 +364,7 @@ class Program
             _overlay?.Close();
             CancelMoveMode();
             CloseDimOverlay();
+            CloseSnapForm();
             TrayIcon.CloseHelpPopup();
 
             // 生成したカーソルリソースを解放
@@ -705,6 +711,23 @@ class Program
                         CancelNumpadWaiting();
                         PostMessage(target, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
                         TrayIcon.ShowMessage("ウィンドウを閉じました (Close)", 1500);
+                    }
+                    else
+                    {
+                        CancelNumpadWaiting();
+                    }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → snap_key シーケンス: NumPad 待ち中に snap_key が押されたらスナップ UI を表示
+                if (isKeyDown && (Keys)vkCode == AppConfig.SnapKey)
+                {
+                    IntPtr target = activeWindow;
+                    if (target != IntPtr.Zero && !IsSystemWindow(target))
+                    {
+                        CancelNumpadWaiting();
+                        TryStartSnapMode(target);
                     }
                     else
                     {
@@ -1711,6 +1734,100 @@ class Program
         int dx = a.X - b.X;
         int dy = a.Y - b.Y;
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    // -----------------------------------------------------------------------
+    // Window Snap Mode
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// スナップ選択 UI を表示する。
+    /// </summary>
+    private static void TryStartSnapMode(IntPtr target)
+    {
+        if (target == IntPtr.Zero || IsSystemWindow(target)) return;
+
+        IntPtr root = GetAncestor(target, GA_ROOT);
+        if (root == IntPtr.Zero) root = target;
+        if (IsSystemWindow(root)) return;
+        if (!GetWindowRect(root, out RECT _)) return;
+
+        _snapTarget = root;
+
+        CloseSnapForm();
+        _snapForm = new WindowSnapForm(root, OnSnapSelected, OnSnapCancelled);
+        _snapForm.Show();
+    }
+
+    /// <summary>
+    /// スナップ選択 UI を閉じる（キャンセルも兼ねる）。
+    /// </summary>
+    private static void CloseSnapForm()
+    {
+        if (_snapForm != null)
+        {
+            var sf = _snapForm;
+            _snapForm = null;
+            if (sf.IsHandleCreated)
+                sf.BeginInvoke(() => sf.Close());
+            else
+                sf.Close();
+        }
+        _snapTarget = IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// スナップ選択が確定したときのコールバック。
+    /// cols/rows: グリッドの列数/行数, col/row: 選択セルの左上インデックス（0始まり）
+    /// </summary>
+    private static void OnSnapSelected(IntPtr target, int cols, int rows, int col, int row)
+    {
+        CloseSnapForm();
+
+        if (target == IntPtr.Zero || IsSystemWindow(target)) return;
+
+        // 対象ウィンドウが存在するモニタの作業領域
+        System.Drawing.Rectangle wa = Screen.FromHandle(target).WorkingArea;
+
+        int[] outer = AppConfig.OuterSpacing; // 上, 右, 下, 左
+        int inner   = AppConfig.InnerSpacing;
+
+        // outer_spacing を適用した配置可能領域
+        int areaLeft   = wa.Left   + outer[3];
+        int areaTop    = wa.Top    + outer[0];
+        int areaRight  = wa.Right  - outer[1];
+        int areaBottom = wa.Bottom - outer[2];
+
+        int totalW = areaRight  - areaLeft;
+        int totalH = areaBottom - areaTop;
+
+        if (totalW <= 0 || totalH <= 0) return;
+
+        // inner_spacing をセル間に配分（左右に (cols-1) 個, 上下に (rows-1) 個）
+        int cellW = (totalW - inner * (cols - 1)) / cols;
+        int cellH = (totalH - inner * (rows - 1)) / rows;
+
+        if (cellW <= 0 || cellH <= 0) return;
+
+        int winLeft   = areaLeft + col * (cellW + inner);
+        int winTop    = areaTop  + row * (cellH + inner);
+        int winWidth  = cellW;
+        int winHeight = cellH;
+
+        // 最大化されている場合は復元してからスナップ
+        if (IsZoomed(target))
+            ShowWindow(target, SW_RESTORE);
+
+        MoveWindow(target, winLeft, winTop, winWidth, winHeight, true);
+        SetForegroundWindow(target);
+    }
+
+    /// <summary>
+    /// スナップ選択がキャンセルされたときのコールバック。
+    /// </summary>
+    private static void OnSnapCancelled()
+    {
+        CloseSnapForm();
     }
 }
 
