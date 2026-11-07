@@ -1245,6 +1245,19 @@ class Program
                     }
                 }
             }
+            else if (_isWaitingForNumpad)
+            {
+                // NumPad 待ち受け中にクリックされたらキャンセル
+                if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+                {
+                    if (msg == WM_LBUTTONDOWN) _suppressNextLButtonUp = true;
+                    else if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                    else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
+
+                    CancelNumpadWaiting();
+                    return (IntPtr)1;
+                }
+            }
             else if (_resizePhase != ResizePhase.None)
             {
                 if (msg == WM_LBUTTONDOWN)
@@ -1582,13 +1595,14 @@ class Program
         }
 
         // 対象windowが最前面に表示された後、次のキー入力待ちの直前にヘルプを表示（次のキー入力まで表示したままにするため autoClose: false）
-        TrayIcon.ShowHelpPopup(autoClose: false);
+        TrayIcon.ShowHelpPopup(autoClose: false, onClosed: CancelNumpadWaiting);
 
         _isWaitingForNumpad = true;
     }
 
     private static void CancelNumpadWaiting()
     {
+        if (!_isWaitingForNumpad) return;
         _isWaitingForNumpad = false;
         ClipCursor(IntPtr.Zero);
         activeWindow = IntPtr.Zero;
@@ -1645,11 +1659,18 @@ class Program
         {
             var ov = _dimOverlay;
             _dimOverlay = null;
-            if (ov.IsHandleCreated)
+            try { ov.Hide(); } catch { }
+            if (!ov.IsDisposed && ov.IsHandleCreated)
                 ov.BeginInvoke(() => ov.Close());
             else
                 ov.Close();
         }
+
+        Application.OpenForms.OfType<DimOverlayForm>().ToList().ForEach(f =>
+        {
+            try { f.Hide(); } catch { }
+            if (!f.IsDisposed) f.Close();
+        });
     }
 
     private static void Timer_Tick(object? sender, EventArgs e)

@@ -74,13 +74,20 @@ sealed class TrayIcon : IDisposable
     /// キー割り当てのヘルプポップアップをカーソル付近に表示する。
     /// </summary>
     /// <param name="autoClose">一定時間（5秒）で自動的に閉じるかどうか。</param>
-    internal static void ShowHelpPopup(bool autoClose = true)
+    /// <param name="onClosed">ポップアップが閉じられたときのコールバック。</param>
+    internal static void ShowHelpPopup(bool autoClose = true, Action? onClosed = null)
     {
-        _helpPopup?.Close();
-        _helpPopup = new HelpPopupForm(BuildHelpText(), autoClose);
-        _helpPopup.FormClosed += (_, _) => _helpPopup = null;
-        _helpPopup.Show();
-        _helpPopup.BringToTopMost();
+        CloseHelpPopup();
+        var popup = new HelpPopupForm(BuildHelpText(), autoClose);
+        _helpPopup = popup;
+        popup.FormClosed += (_, _) =>
+        {
+            if (_helpPopup == popup)
+                _helpPopup = null;
+            onClosed?.Invoke();
+        };
+        popup.Show();
+        popup.BringToTopMost();
     }
 
     /// <summary>
@@ -89,10 +96,15 @@ sealed class TrayIcon : IDisposable
     internal static void ShowMessage(string text, int durationMs = 1500)
     {
         CloseHelpPopup();
-        _helpPopup = new HelpPopupForm(text, autoClose: true, durationMs: durationMs);
-        _helpPopup.FormClosed += (_, _) => _helpPopup = null;
-        _helpPopup.Show();
-        _helpPopup.BringToTopMost();
+        var popup = new HelpPopupForm(text, autoClose: true, durationMs: durationMs);
+        _helpPopup = popup;
+        popup.FormClosed += (_, _) =>
+        {
+            if (_helpPopup == popup)
+                _helpPopup = null;
+        };
+        popup.Show();
+        popup.BringToTopMost();
     }
 
     /// <summary>
@@ -104,6 +116,7 @@ sealed class TrayIcon : IDisposable
         {
             var p = _helpPopup;
             _helpPopup = null;
+            try { p.Hide(); } catch { }
             if (p.IsHandleCreated)
                 p.BeginInvoke(() => p.Close());
             else
