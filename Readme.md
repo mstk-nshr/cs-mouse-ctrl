@@ -6,7 +6,7 @@
 | --- | ----------- |
 | Pause/Break -> Numpad1..9 | move mouse pointer (window 9-positions, Pause/Break again to cancel) |
 | Pause/Break -> M | move active window |
-| Pause/Break -> F11 | resize active window |
+| Pause/Break -> R | resize active window |
 | Pause/Break -> F | fit active window to the largest free area |
 | Pause/Break -> T | pin / unpin active window as topmost |
 | Pause/Break -> B | send active window to the bottom of the Z-order |
@@ -106,10 +106,10 @@ Pause -> M 押下
 - **移動のキャンセル**: それ以外の入力（`Esc` やその他のキー、右クリックなど）があった場合は、ウィンドウを移動前の位置に戻して移動モードを終了します。
 
 
-### Resize-Active-Window 動作フロー
+### Window Resize 動作フロー
 
 ```
-Pause -> F11 押下
+Pause -> R 押下
   ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ 半透明青色オーバーレイ表示
   ↓ マウス→BOX左上へ移動
@@ -222,15 +222,15 @@ ctrl = 5
 # NumPad 待ち受けを起動するキー名の配列（Windows Forms の Keys 列挙体の名前）
 # 例: ["Pause", "Break"], ["F12"], ["ScrollLock"]
 # "Break" は Ctrl+Break に対応します。
-hotkey = ["Pause", "Break"]
+hotkeys = ["Pause", "Break"]
 
 # ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "M"
 move_key = "M"
 
 # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
-# 例: "F11", "F10", "F9"
-resize_key = "F11"
+# 例: "R", "F10", "F9"
+resize_key = "R"
 
 # ウィンドウを空きエリアへフィットさせるキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "F", "F8"
@@ -269,9 +269,9 @@ inner_spacing = 10
 | :--- | :--- | :--- | :--- | :--- |
 | `[speed_multiplier]` | `alt` | 数値 | `2` | Alt + マウス移動の速度倍率（0.5 等の小数指定で減速可能） |
 | `[speed_multiplier]` | `ctrl` | 数値 | `5` | Ctrl + マウス移動の速度倍率（0.5 等の小数指定で減速可能） |
-| `[hotkey]` | `hotkey` | 文字列配列 | `["Pause", "Break"]` | NumPad 待ち受けを起動するキー名の配列 |
+| `[hotkey]` | `hotkeys` | 文字列配列 | `["Pause", "Break"]` | NumPad 待ち受けを起動するキー名の配列 |
 | `[hotkey]` | `move_key` | 文字列 | `"M"` | ウィンドウ移動モードのトリガーキー |
-| `[hotkey]` | `resize_key` | 文字列 | `"F11"` | ウィンドウリサイズモードのトリガーキー |
+| `[hotkey]` | `resize_key` | 文字列 | `"R"` | ウィンドウリサイズモードのトリガーキー |
 | `[hotkey]` | `fit_key` | 文字列 | `"F"` | ウィンドウを空きエリアへフィットさせるキー |
 | `[hotkey]` | `topmost_key` | 文字列 | `"T"` | ウィンドウの最前面（Topmost）固定/解除をトグルするキー |
 | `[hotkey]` | `bottom_key` | 文字列 | `"B"` | ウィンドウの Z-order を最背面（最下位）へ移動するキー |
@@ -283,9 +283,9 @@ inner_spacing = 10
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 
 > [!NOTE]
-> 各ホットキー設定には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"F11"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`, `"I"`, `"A"`, `"X"`）。
+> 各ホットキー設定には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"R"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`, `"I"`, `"A"`, `"X"`）。
 >
-> `hotkey` は配列で指定し、複数のキーを登録できます。`"Break"` は `Ctrl+Break` に対応します（内部的には `Keys.Cancel`）。旧形式の `pause_key = "Pause"` も後方互換のため引き続き読み込まれます。
+> `hotkeys` は配列で指定し、複数のキーを登録できます。`"Break"` は `Ctrl+Break` に対応します（内部的には `Keys.Cancel`）。旧形式の `pause_key = "Pause"` も後方互換のため引き続き読み込まれます。
 >
 > `outer_spacing` は `[上, 右, 下, 左]` の順に 4 つの整数を指定します（例: `outer_spacing = [40, 10, 10, 10]`）。
 

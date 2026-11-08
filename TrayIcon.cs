@@ -164,18 +164,20 @@ sealed class TrayIcon : IDisposable
         string snap  = AppConfig.SnapKey.ToString();
 
         return
-            $"{pause} → NumPad1..9: カーソル移動\n" +
-            $"{pause} → {move}: ウィンドウ移動\n" +
-            $"{pause} → {resize}, click, click: ウィンドウリサイズ\n" +
-            $"{pause} → {fit}: 空きエリアへフィット\n" +
-            $"{pause} → {topmost}: 最前面固定/解除\n" +
-            $"{pause} → {bottom}: 最背面へ移動\n" +
-            $"{pause} → {minimize}: 最小化\n" +
-            $"{pause} → {maximize}: 最大化\n" +
-            $"{pause} → {close}: ウィンドウを閉じる\n" +
-            $"{pause} → {snap}: スナップ選択 UI\n" +
-            $"Alt + マウス移動: {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +
-            $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速";
+            $"cs_mouse_ctrl v1.00\n\n" +
+            $"{pause} →\n" +
+            $"    NumPad1..9:  カーソル移動\n" +
+            $"    {move}:  ウィンドウ移動\n" +
+            $"    {resize}:  ウィンドウリサイズ\n" +
+            $"    {fit}:  空きエリアへフィット\n" +
+            $"    {topmost}:  最前面固定/解除\n" +
+            $"    {bottom}:  最背面へ移動\n" +
+            $"    {minimize}:  最小化\n" + 
+            $"    {maximize}:  最大化\n" +
+            $"    {close}:  ウィンドウを閉じる\n" +
+            $"    {snap}:  スナップ選択 UI\n" +
+            $"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +
+            $"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速";
     }
 
     public void Dispose()

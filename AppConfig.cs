@@ -14,8 +14,8 @@ static class AppConfig
     // 設定値（既定値）
     // -----------------------------------------------------------------------
 
-    /// <summary>Alt + Mouse Move の速度倍率（デフォルト 2.0）</summary>
-    public static double AltMultiplier { get; private set; } = 2.0;
+    /// <summary>Alt + Mouse Move の速度倍率（デフォルト 0.3）</summary>
+    public static double AltMultiplier { get; private set; } = 0.3;
 
     /// <summary>互換用エイリアス</summary>
     public static double ShiftMultiplier => AltMultiplier;
@@ -25,7 +25,7 @@ static class AppConfig
 
     /// <summary>
     /// NumPad 待ち受けを開始するキーの一覧（デフォルト Pause, Break）。
-    /// config.toml の [hotkey] hotkey に文字列配列で指定する。
+    /// config.toml の [hotkey] hotkeys に文字列配列で指定する。
     /// "Break" は Ctrl+Break が生成する VK_CANCEL に対応する。
     /// </summary>
     public static Keys[] PauseKeys { get; private set; } = { Keys.Pause, Keys.Cancel };
@@ -45,10 +45,10 @@ static class AppConfig
     public static Keys MoveKey { get; private set; } = Keys.M;
 
     /// <summary>
-    /// ウィンドウリサイズモードを起動するトリガーキー（デフォルト F11）。
+    /// ウィンドウリサイズモードを起動するトリガーキー（デフォルト R）。
     /// config.toml の [hotkey] resize_key に文字列で指定する。
     /// </summary>
-    public static Keys ResizeKey { get; private set; } = Keys.F11;
+    public static Keys ResizeKey { get; private set; } = Keys.R;
 
     /// <summary>
     /// ウィンドウを空きエリアへフィットさせるキー（デフォルト F）。
@@ -132,14 +132,14 @@ static class AppConfig
         # NumPad 待ち受けを起動するキー名の配列（Windows Forms の Keys 列挙体の名前）
         # 例: ["Pause", "Break"], ["F12"], ["ScrollLock"]
         # "Break" は Ctrl+Break に対応します。
-        hotkey = {PauseKeysToml}
+        hotkeys = {PauseKeysToml}
 
         # ウィンドウ移動モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "M"
         move_key = "{KeysToString(MoveKey)}"
 
         # ウィンドウリサイズモードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
-        # 例: "F11", "F10", "F9"
+        # 例: "R", "F10", "F9"
         resize_key = "{KeysToString(ResizeKey)}"
 
         # ウィンドウを空きエリアへフィットさせるキー名（Windows Forms の Keys 列挙体の名前）
@@ -265,7 +265,7 @@ static class AppConfig
                 break;
 
             case "hotkey":
-                if (key == "hotkey")
+                if (key == "hotkeys")
                 {
                     if (TryParseKeysArray(value, out Keys[] keys) && keys.Length > 0)
                         PauseKeys = keys;
