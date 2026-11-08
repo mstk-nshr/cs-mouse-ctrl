@@ -174,8 +174,8 @@ sealed class TrayIcon : IDisposable
             $"{pause} → {maximize}: 最大化\n" +
             $"{pause} → {close}: ウィンドウを閉じる\n" +
             $"{pause} → {snap}: スナップ選択 UI\n" +
-            $"Alt + マウス移動: {AppConfig.AltMultiplier}倍速\n" +
-            $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier}倍速";
+            $"Alt + マウス移動: {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +
+            $"Ctrl + マウス移動: {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速";
     }
 
     public void Dispose()

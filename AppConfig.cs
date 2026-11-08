@@ -14,14 +14,14 @@ static class AppConfig
     // 設定値（既定値）
     // -----------------------------------------------------------------------
 
-    /// <summary>Alt + Mouse Move の速度倍率（デフォルト 2）</summary>
-    public static int AltMultiplier { get; private set; } = 2;
+    /// <summary>Alt + Mouse Move の速度倍率（デフォルト 2.0）</summary>
+    public static double AltMultiplier { get; private set; } = 2.0;
 
     /// <summary>互換用エイリアス</summary>
-    public static int ShiftMultiplier => AltMultiplier;
+    public static double ShiftMultiplier => AltMultiplier;
 
-    /// <summary>Ctrl + Mouse Move の速度倍率（デフォルト 5）</summary>
-    public static int CtrlMultiplier { get; private set; } = 5;
+    /// <summary>Ctrl + Mouse Move の速度倍率（デフォルト 5.0）</summary>
+    public static double CtrlMultiplier { get; private set; } = 5.0;
 
     /// <summary>
     /// NumPad 待ち受けを開始するキーの一覧（デフォルト Pause, Break）。
@@ -123,10 +123,10 @@ static class AppConfig
         # 変更後はアプリを再起動してください。
 
         [speed_multiplier]
-        # Alt キーを押しながらマウス移動したときの速度倍率（整数）
-        alt = {AltMultiplier}
-        # Ctrl キーを押しながらマウス移動したときの速度倍率（整数）
-        ctrl = {CtrlMultiplier}
+        # Alt キーを押しながらマウス移動したときの速度倍率（数値。0.5で半分に低下、2で2倍など）
+        alt = {AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}
+        # Ctrl キーを押しながらマウス移動したときの速度倍率（数値。0.5で半分に低下、5で5倍など）
+        ctrl = {CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}
 
         [hotkey]
         # NumPad 待ち受けを起動するキー名の配列（Windows Forms の Keys 列挙体の名前）
@@ -258,9 +258,9 @@ static class AppConfig
         switch (section)
         {
             case "speed_multiplier":
-                if ((key == "alt" || key == "shift") && int.TryParse(value, out int av) && av >= 1)
+                if ((key == "alt" || key == "shift") && TryParseMultiplier(value, out double av))
                     AltMultiplier = av;
-                if (key == "ctrl"  && int.TryParse(value, out int cv) && cv >= 1)
+                if (key == "ctrl" && TryParseMultiplier(value, out double cv))
                     CtrlMultiplier = cv;
                 break;
 
@@ -371,6 +371,15 @@ static class AppConfig
         if (s.Length >= 2 && s[0] == '"' && s[^1] == '"')
             return s[1..^1];
         return s;
+    }
+
+    /// <summary>速度倍率の文字列（"2", "0.5" 等）を double へパースする（> 0）。</summary>
+    private static bool TryParseMultiplier(string s, out double result)
+    {
+        return double.TryParse(s.Trim().Replace(',', '.'),
+                               System.Globalization.NumberStyles.Float,
+                               System.Globalization.CultureInfo.InvariantCulture,
+                               out result) && result > 0 && !double.IsInfinity(result) && !double.IsNaN(result);
     }
 
     private static bool TryParseKeys(string name, out Keys key)

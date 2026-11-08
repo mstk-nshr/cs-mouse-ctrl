@@ -215,9 +215,11 @@ class Program
     private static bool rightShiftPressed;
     private static IntPtr activeWindow;
 
-    // 高速移動: 直前のマウス座標（増幅計算用）
+    // 高速移動・減速移動: 直前のマウス座標および端数アキュムレータ
     private static POINT _lastMousePt;
     private static bool _lastMousePtValid = false;
+    private static double _mouseRemainderX = 0;
+    private static double _mouseRemainderY = 0;
 
     private static bool _isWaitingForNumpad;
     private static long _lastPauseTick;
@@ -485,17 +487,19 @@ class Program
                 {
                     case Keys.LControlKey:
                         leftCtrlPressed = pressed;
-                        if (!pressed) _lastMousePtValid = false;
+                        if (!pressed) { _lastMousePtValid = false; _mouseRemainderX = 0; _mouseRemainderY = 0; }
                         break;
                     case Keys.RControlKey:
                         rightCtrlPressed = pressed;
-                        if (!pressed) _lastMousePtValid = false;
+                        if (!pressed) { _lastMousePtValid = false; _mouseRemainderX = 0; _mouseRemainderY = 0; }
                         break;
                     case Keys.LMenu:
                         leftAltPressed = pressed;
                         if (!pressed)
                         {
                             _lastMousePtValid = false;
+                            _mouseRemainderX = 0;
+                            _mouseRemainderY = 0;
                             _altMaskSent = false;
                         }
                         break;
@@ -504,6 +508,8 @@ class Program
                         if (!pressed)
                         {
                             _lastMousePtValid = false;
+                            _mouseRemainderX = 0;
+                            _mouseRemainderY = 0;
                             _altMaskSent = false;
                         }
                         break;
@@ -1161,7 +1167,7 @@ class Program
 
                     if (altDown || ctrlDown)
                     {
-                        int multiplier = ctrlDown ? AppConfig.CtrlMultiplier : AppConfig.AltMultiplier;
+                        double multiplier = ctrlDown ? AppConfig.CtrlMultiplier : AppConfig.AltMultiplier;
 
                         if (altDown && !_altMaskSent)
                         {
@@ -1178,8 +1184,17 @@ class Program
 
                             if (dx != 0 || dy != 0)
                             {
-                                int newX = ms.pt.X + dx * (multiplier - 1);
-                                int newY = ms.pt.Y + dy * (multiplier - 1);
+                                double moveX = dx * multiplier + _mouseRemainderX;
+                                double moveY = dy * multiplier + _mouseRemainderY;
+
+                                int intMoveX = (int)Math.Round(moveX, MidpointRounding.AwayFromZero);
+                                int intMoveY = (int)Math.Round(moveY, MidpointRounding.AwayFromZero);
+
+                                _mouseRemainderX = moveX - intMoveX;
+                                _mouseRemainderY = moveY - intMoveY;
+
+                                int newX = _lastMousePt.X + intMoveX;
+                                int newY = _lastMousePt.Y + intMoveY;
 
                                 // 仮想スクリーン範囲にクランプ
                                 newX = Math.Clamp(newX,
@@ -1193,15 +1208,21 @@ class Program
                                 SetCursorPos(newX, newY);
                                 return (IntPtr)1; // 元のイベントを抑制
                             }
+
+                            return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
                         }
 
                         _lastMousePt = ms.pt;
                         _lastMousePtValid = true;
+                        _mouseRemainderX = 0;
+                        _mouseRemainderY = 0;
                         return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
                     }
                     else
                     {
                         _lastMousePtValid = false;
+                        _mouseRemainderX = 0;
+                        _mouseRemainderY = 0;
                     }
                 }
 
