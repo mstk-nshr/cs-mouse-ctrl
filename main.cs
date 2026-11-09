@@ -98,6 +98,9 @@ class Program
     static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
     static extern bool SetSystemCursor(IntPtr hcur, uint id);
 
     [DllImport("user32.dll")]
@@ -201,6 +204,17 @@ class Program
     private const int DWMWA_CLOAKED = 14;
     private const int KEYEVENTF_KEYUP = 0x0002;
     private const byte VK_MENU_MASK = 0xE8;
+    private const int VK_LBUTTON = 0x01;
+    private const int VK_RBUTTON = 0x02;
+    private const int VK_MBUTTON = 0x04;
+    private const int VK_XBUTTON1 = 0x05;
+    private const int VK_XBUTTON2 = 0x06;
+    private const int VK_CONTROL = 0x11;
+    private const int VK_MENU = 0x12;
+    private const uint LLMHF_INJECTED = 0x00000001;
+    private const uint LLMHF_LOWER_IL_INJECTED = 0x00000002;
+
+    private static bool IsKeyDownAsync(int vKey) => (GetAsyncKeyState(vKey) & 0x8000) != 0;
 
     private static IntPtr _hookID = IntPtr.Zero;
     private static IntPtr _mouseHookID = IntPtr.Zero;
@@ -220,6 +234,18 @@ class Program
     private static bool _lastMousePtValid = false;
     private static double _mouseRemainderX = 0;
     private static double _mouseRemainderY = 0;
+
+    private static void ResetMouseSpeedState()
+    {
+        _lastMousePtValid = false;
+        _mouseRemainderX = 0;
+        _mouseRemainderY = 0;
+        _altMaskSent = false;
+        leftCtrlPressed = false;
+        rightCtrlPressed = false;
+        leftAltPressed = false;
+        rightAltPressed = false;
+    }
 
     private static bool _isWaitingForNumpad;
     private static long _lastPauseTick;
@@ -493,6 +519,11 @@ class Program
                         rightCtrlPressed = pressed;
                         if (!pressed) { _lastMousePtValid = false; _mouseRemainderX = 0; _mouseRemainderY = 0; }
                         break;
+                    case Keys.ControlKey:
+                        leftCtrlPressed = pressed;
+                        rightCtrlPressed = pressed;
+                        if (!pressed) { _lastMousePtValid = false; _mouseRemainderX = 0; _mouseRemainderY = 0; }
+                        break;
                     case Keys.LMenu:
                         leftAltPressed = pressed;
                         if (!pressed)
@@ -513,6 +544,17 @@ class Program
                             _altMaskSent = false;
                         }
                         break;
+                    case Keys.Menu:
+                        leftAltPressed = pressed;
+                        rightAltPressed = pressed;
+                        if (!pressed)
+                        {
+                            _lastMousePtValid = false;
+                            _mouseRemainderX = 0;
+                            _mouseRemainderY = 0;
+                            _altMaskSent = false;
+                        }
+                        break;
                     case Keys.LWin:
                         leftWinPressed = pressed;
                         break;
@@ -523,6 +565,10 @@ class Program
                         leftShiftPressed = pressed;
                         break;
                     case Keys.RShiftKey:
+                        rightShiftPressed = pressed;
+                        break;
+                    case Keys.ShiftKey:
+                        leftShiftPressed = pressed;
                         rightShiftPressed = pressed;
                         break;
                 }
@@ -805,6 +851,7 @@ class Program
         _isMoveMode = false;
         _moveTarget = IntPtr.Zero;
         RestoreMoveCursor();
+        ResetMouseSpeedState();
     }
 
     private static void CancelMoveMode()
@@ -812,6 +859,7 @@ class Program
         if (!_isMoveMode) return;
         _isMoveMode = false;
         RestoreMoveCursor();
+        ResetMouseSpeedState();
         if (_moveTarget != IntPtr.Zero)
         {
             if (_moveWasZoomed)
@@ -1119,6 +1167,7 @@ class Program
         _resizeTarget = IntPtr.Zero;
         // マウスフックは常時維持するので解除しない
         CloseOverlay();
+        ResetMouseSpeedState();
     }
 
     private static void CloseOverlay()
@@ -1162,8 +1211,47 @@ class Program
                 // --- 高速移動 (Resize Mode, Move Mode 外のみ) ---
                 if (_resizePhase == ResizePhase.None && !_isMoveMode)
                 {
-                    bool altDown  = leftAltPressed  || rightAltPressed;
-                    bool ctrlDown = leftCtrlPressed || rightCtrlPressed;
+                    // 1. 合成イベント（自身が SetCursorPos で注入したものや他ツールによる注入）は除外
+                    bool isInjected = (ms.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) != 0;
+                    if (isInjected)
+                    {
+                        return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
+                    }
+
+                    // 2. マウスボタン（左・右・中央・拡張ボタン）押下中（ドラッグ中）は加速しない
+                    //    PowerToys FancyZones や Window Snap によるウィンドウのドラッグ、
+                    //    通常のドラッグ＆ドロップ、矩形選択等の操作を妨害しないようにする
+                    bool isAnyMouseButtonDown = IsKeyDownAsync(VK_LBUTTON)
+                        || IsKeyDownAsync(VK_RBUTTON)
+                        || IsKeyDownAsync(VK_MBUTTON)
+                        || IsKeyDownAsync(VK_XBUTTON1)
+                        || IsKeyDownAsync(VK_XBUTTON2);
+
+                    if (isAnyMouseButtonDown)
+                    {
+                        _lastMousePtValid = false;
+                        _mouseRemainderX = 0;
+                        _mouseRemainderY = 0;
+                        return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
+                    }
+
+                    // 3. 物理的なキー押下状態を GetAsyncKeyState で同期・取得
+                    //    PowerToys や Window Snap、他アプリのフックによる KeyUp/KeyDown 取りこぼし（キー状態スタック）を解消する
+                    bool ctrlDown = IsKeyDownAsync(VK_CONTROL);
+                    bool altDown  = IsKeyDownAsync(VK_MENU);
+
+                    // 内部フラグとの同期
+                    if (!ctrlDown)
+                    {
+                        leftCtrlPressed = false;
+                        rightCtrlPressed = false;
+                    }
+                    if (!altDown)
+                    {
+                        leftAltPressed = false;
+                        rightAltPressed = false;
+                        _altMaskSent = false;
+                    }
 
                     if (altDown || ctrlDown)
                     {
@@ -1181,6 +1269,15 @@ class Program
                         {
                             int dx = ms.pt.X - _lastMousePt.X;
                             int dy = ms.pt.Y - _lastMousePt.Y;
+
+                            // 異常に大きなジャンプ（マルチモニタ間のワープや外部ツールの急激な位置変更等）は破棄
+                            if (Math.Abs(dx) > 1000 || Math.Abs(dy) > 1000)
+                            {
+                                _lastMousePt = ms.pt;
+                                _mouseRemainderX = 0;
+                                _mouseRemainderY = 0;
+                                return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
+                            }
 
                             if (dx != 0 || dy != 0)
                             {
@@ -1629,6 +1726,7 @@ class Program
         activeWindow = IntPtr.Zero;
         CloseDimOverlay();
         TrayIcon.CloseHelpPopup();
+        ResetMouseSpeedState();
     }
 
     // -----------------------------------------------------------------------
@@ -1816,6 +1914,7 @@ class Program
                 sf.Close();
         }
         _snapTarget = IntPtr.Zero;
+        ResetMouseSpeedState();
     }
 
     /// <summary>
