@@ -235,6 +235,23 @@ class Program
     private static double _mouseRemainderX = 0;
     private static double _mouseRemainderY = 0;
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref int pvParam, uint fWinIni);
+
+    private const uint SPI_GETMOUSESPEED = 0x0070;
+    private const uint SPI_SETMOUSESPEED = 0x0071;
+    private const uint SPIF_UPDATEINIFILE = 0x01;
+
+    /// <summary>Windows 標準のマウスポインター速度（1〜20）を delta 段階変更し、結果を 2 秒表示する。</summary>
+    private static void ChangeSystemMouseSpeed(int delta)
+    {
+        int cur = 0;
+        if (!SystemParametersInfo(SPI_GETMOUSESPEED, 0, ref cur, 0)) return;
+        int next = Math.Clamp(cur + delta, 1, 20);
+        if (next != cur)
+            SystemParametersInfo(SPI_SETMOUSESPEED, 0, (IntPtr)next, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+        TrayIcon.ShowMessage($"マウス速度: {cur} → {next}" + (next == cur ? " (限界)" : ""), 2000);
+    }
     private static void ResetMouseSpeedState()
     {
         _lastMousePtValid = false;
@@ -681,6 +698,15 @@ class Program
                     return (IntPtr)1;
                 }
 
+                // pause_key → '.' / ',' シーケンス: マウス移動速度（Alt/Ctrl 倍率）の増減
+                if (isKeyDown && ((Keys)vkCode == Keys.OemPeriod || (Keys)vkCode == Keys.Oemcomma))
+                {
+                    bool up = (Keys)vkCode == Keys.OemPeriod;
+                    CancelNumpadWaiting();
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    ChangeSystemMouseSpeed(up ? 1 : -1);
+                    return (IntPtr)1;
+                }
                 // pause_key → topmost_key シーケンス: NumPad 待ち中に topmost_key が押されたら最前面固定/解除
                 if (isKeyDown && (Keys)vkCode == AppConfig.TopmostKey)
                 {

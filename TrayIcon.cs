@@ -164,7 +164,7 @@ sealed class TrayIcon : IDisposable
         string snap  = AppConfig.SnapKey.ToString();
 
         return
-            $"cs_mouse_ctrl v1.00\n\n" +
+            $"cs_mouse_ctrl v261118.0900\n\n" +
             $"{pause} →\n" +
             $"    NumPad1..9:  カーソル移動\n" +
             $"    {move}:  ウィンドウ移動\n" +
@@ -176,6 +176,7 @@ sealed class TrayIcon : IDisposable
             $"    {maximize}:  最大化\n" +
             $"    {close}:  ウィンドウを閉じる\n" +
             $"    {snap}:  スナップ選択 UI\n" +
+            $", . :  マウス移動速度の増減（1..20）\n" +
             $"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +
             $"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速";
     }
