@@ -4,16 +4,18 @@
 
 | Key | Description |
 | --- | ----------- |
-| Pause/Break -> Numpad1..9 | move mouse pointer (window 9-positions, Pause/Break again to cancel) |
-| Pause/Break -> M | move active window |
-| Pause/Break -> R | resize active window |
-| Pause/Break -> F | fit active window to the largest free area |
-| Pause/Break -> T | pin / unpin active window as topmost |
-| Pause/Break -> B | send active window to the bottom of the Z-order |
-| Pause/Break -> I | minimize active window |
-| Pause/Break -> A | maximize / restore active window |
-| Pause/Break -> X | close active window |
-| Pause/Break -> S | snap active window to grid position |
+| Hotkey -> Numpad1..9 | move mouse pointer (window 9-positions, Hotkey again to cancel) |
+| Hotkey -> M | move active window |
+| Hotkey -> R | resize active window |
+| Hotkey -> F | fit active window to the largest free area |
+| Hotkey -> T | pin / unpin active window as topmost |
+| Hotkey -> B | send active window to the bottom of the Z-order |
+| Hotkey -> I | minimize active window |
+| Hotkey -> A | maximize / restore active window |
+| Hotkey -> X | close active window |
+| Hotkey -> S | snap active window to grid position |
+| Hotkey -> . | increment mouse speed (1..20) |
+| Hotkey -> , | decrement mouse speed (1..20) |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
 | Ctrl + Mouse Move | move mouse pointer at 5× speed |
 
@@ -32,14 +34,14 @@
 
 ### move-mouse-pointer 
 
-`Pause` キーまたは `Break` キー（`Ctrl+Break`）を押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
+ホットキー（config.tomlのhotkeysに指定したキーのいずれか）を押した後、カーソル位置にあるウィンドウに対象が固定（カーソルがウィンドウ内にクリップ）され、その状態でテンキー（NumPad 1〜9）を押すことで、ウィンドウ内の 9 箇所の位置へマウスポインターを瞬時に移動させることができます。
 
-- **Pause/Breakキー方式（モーダル入力）**:
-  - `Pause` キーまたは `Break` キー（`Ctrl+Break`）を押すと、**デスクトップ全体が黒色半透明の矩形で覆われ**、対象ウィンドウがその手前（最前面）に表示され、**カーソル周辺にポップアップヘルプ**が表示されます。
+- **ホットキー方式（モーダル入力）**:
+  - ホットキー（config.tomlのhotkeysに指定したキーのいずれか）を押すと、**デスクトップ全体が黒色半透明の矩形で覆われ**、対象ウィンドウがその手前（最前面）に表示され、**カーソル周辺にポップアップヘルプ**が表示されます。
   - そのままテンキー待ち状態に入り、カーソルが対象ウィンドウ内に固定されます。
   - 続けて `NumPad 1〜9` を押すと該当位置へカーソルが移動し、待ち状態が終了します（ポップアップヘルプも閉じます）。
-  - 待ち状態中にもう一度 `Pause` キーまたは `Break` キー（あるいは `Esc` キー、マウスクリック）を押すと、移動を行わずにテンキー待ちをキャンセルします（ポップアップヘルプも閉じます）。
-  - キー入力の処理が終わる（またはキャンセルする）と、黒色半透明の矩形およびポップアップヘルプは自動的に削除され、対象ウィンドウの最前面状態も元に戻ります。その後は次の `Pause` / `Break` キー入力を待ちます。
+  - 待ち状態中にもう一度 ホットキー（あるいは `Esc` キー、マウスクリック）を押すと、移動を行わずにテンキー待ちをキャンセルします（ポップアップヘルプも閉じます）。
+  - キー入力の処理が終わる（またはキャンセルする）と、黒色半透明の矩形およびポップアップヘルプは自動的に削除され、対象ウィンドウの最前面状態も元に戻ります。その後は次の ホットキー入力を待ちます。
 
 #### テンキー配置と移動位置の対応
 
@@ -55,23 +57,30 @@
 
 | キー | 移動位置 | 計算座標（ウィンドウ矩形内） | 説明 |
 | :--- | :--- | :--- | :--- |
-| **Pause -> NumPad 7** | 左上 (Top-Left) | `(Left + 10, Top + 10)` | ウィンドウの左上隅（タイトルバー左側付近）へ移動 |
-| **Pause -> NumPad 8** | 上中央 (Top-Center) | `(CenterX, Top + 10)` | ウィンドウの上辺中央（タイトルバー中央付近）へ移動 |
-| **Pause -> NumPad 9** | 右上 (Top-Right) | `(Right - 10, Top + 10)` | ウィンドウの右上隅（閉じるボタン付近）へ移動 |
-| **Pause -> NumPad 4** | 左中央 (Middle-Left) | `(Left + 10, CenterY)` | ウィンドウの左辺中央へ移動 |
-| **Pause -> NumPad 5** | 中央 (Center) | `(CenterX, CenterY)` | ウィンドウの真ん中へ移動 |
-| **Pause -> NumPad 6** | 右中央 (Middle-Right) | `(Right - 10, CenterY)` | ウィンドウの右辺中央へ移動 |
-| **Pause -> NumPad 1** | 左下 (Bottom-Left) | `(Left + 10, Bottom - 10)` | ウィンドウの左下隅へ移動 |
-| **Pause -> NumPad 2** | 下中央 (Bottom-Center) | `(CenterX, Bottom - 10)` | ウィンドウの下辺中央へ移動 |
-| **Pause -> NumPad 3** | 右下 (Bottom-Right) | `(Right - 10, Bottom - 10)` | ウィンドウの右下隅へ移動 |
+| **Hotkey -> NumPad 7** | 左上 (Top-Left) | `(Left + 10, Top + 10)` | ウィンドウの左上隅（タイトルバー左側付近）へ移動 |
+| **Hotkey -> NumPad 8** | 上中央 (Top-Center) | `(CenterX, Top + 10)` | ウィンドウの上辺中央（タイトルバー中央付近）へ移動 |
+| **Hotkey -> NumPad 9** | 右上 (Top-Right) | `(Right - 10, Top + 10)` | ウィンドウの右上隅（閉じるボタン付近）へ移動 |
+| **Hotkey -> NumPad 4** | 左中央 (Middle-Left) | `(Left + 10, CenterY)` | ウィンドウの左辺中央へ移動 |
+| **Hotkey -> NumPad 5** | 中央 (Center) | `(CenterX, CenterY)` | ウィンドウの真ん中へ移動 |
+| **Hotkey -> NumPad 6** | 右中央 (Middle-Right) | `(Right - 10, CenterY)` | ウィンドウの右辺中央へ移動 |
+| **Hotkey -> NumPad 1** | 左下 (Bottom-Left) | `(Left + 10, Bottom - 10)` | ウィンドウの左下隅へ移動 |
+| **Hotkey -> NumPad 2** | 下中央 (Bottom-Center) | `(CenterX, Bottom - 10)` | ウィンドウの下辺中央へ移動 |
+| **Hotkey -> NumPad 3** | 右下 (Bottom-Right) | `(Right - 10, Bottom - 10)` | ウィンドウの右下隅へ移動 |
 
 > [!NOTE]
-> - **黒色半透明オーバーレイ**: `Pause` キーを押すと、全モニタ（仮想スクリーン）を覆う黒色半透明ウィンドウが表示され、対象ウィンドウだけがその手前に浮き上がって見えます。オーバーレイはクリックを透過するため、対象ウィンドウの操作を妨げません。
-> - **カーソルクリップ機能**: `Pause` キーを押してテンキー待ち状態に入っている間はマウスカーソルの移動可能範囲が対象ウィンドウ内に制限（`ClipCursor`）されます。移動完了時、またはもう一度 `Pause` キー（もしくは `Esc` キー）を押すと自動的に制限が解除されます。
+> - **黒色半透明オーバーレイ**: ホットキーを押すと、全モニタ（仮想スクリーン）を覆う黒色半透明ウィンドウが表示され、対象ウィンドウだけがその手前に浮き上がって見えます。オーバーレイはクリックを透過するため、対象ウィンドウの操作を妨げません。
+> - **カーソルクリップ機能**: ホットキーを押してテンキー待ち状態に入っている間はマウスカーソルの移動可能範囲が対象ウィンドウ内に制限（`ClipCursor`）されます。移動完了時、またはもう一度 ホットキー（もしくは `Esc` キー）を押すと自動的に制限が解除されます。
 > - **マージン**: 各隅の座標はウィンドウ境界の外に出てしまわないよう、境界から内側へ 10px のオフセットが自動適用されます。
 
 
-### 高速・低速マウス移動（速度変更）
+### マウス移動速度変更
+
+```
+Hotkey -> '.'
+  マウス移動速度を 1 増加する（1..20）
+Hotkey -> ','
+  マウス移動速度を 1 減少する（1..20）
+```
 
 `Alt` または `Ctrl` キーを押しながらマウスを動かすと、設定された倍率に応じてマウスポインターが高速化または低速化（減速）します。
 
@@ -82,7 +91,7 @@
 | **Ctrl + Alt** + マウス移動 | **5倍** | Ctrl が優先される |
 
 > [!NOTE]
-> - 移動速度の倍率は小数を指定可能（例: `0.5` で半減、`2` で 2 倍）です。
+> - 移動速度の倍率は小数を指定可能（例: `0.5` で半減、`2` で 2 倍）です。config.toml で変更可能。
 > - 高速移動中に画面端を超えようとした場合は、仮想スクリーンの端にクランプされます。
 > - キーを離すと即座に通常速度に戻ります。
 
@@ -90,7 +99,7 @@
 ### Window Move 動作フロー
 
 ```
-Pause -> M 押下
+Hotkey -> M 押下
   ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ ウィンドウ移動モード開始（マウス移動に伴い対象ウィンドウがリアルタイム追従）
 [移動決定]
@@ -99,7 +108,7 @@ Pause -> M 押下
   他の入力（Esc、その他のキー、右クリック等） → 移動前の位置に戻してモード終了
 ```
 
-- `Pause` キーを押して対象ウィンドウを選択後、`M` キーを押すことでウィンドウ移動モードに入ります。
+- ホットキーを押して対象ウィンドウを選択後、`M` キーを押すことでウィンドウ移動モードに入ります。
 - 移動モード中は、マウスの移動に伴い対象ウィンドウもリアルタイムに移動します。
 - **カーソル形状**: 移動モード中はマウスカーソルが**手のひら（開いた手）形状**に変化し、移動操作中であることが視覚的に分かります。モード終了時（決定・キャンセル）には標準の矢印カーソルへ戻ります。
 - **移動の決定**: マウスクリック（左クリック）または `Enter` キーを押すと、現在の位置で移動を確定して移動モードを終了します。
@@ -109,7 +118,7 @@ Pause -> M 押下
 ### Window Resize 動作フロー
 
 ```
-Pause -> R 押下
+Hotkey -> R 押下
   ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ 半透明青色オーバーレイ表示
   ↓ マウス→BOX左上へ移動
@@ -127,7 +136,7 @@ Pause -> R 押下
 ### Window Fit 動作フロー
 
 ```
-Pause -> F 押下
+Hotkey -> F 押下
   ↓ 対象ウィンドウ取得（カーソル直下のウィンドウ）
   ↓ 対象ウィンドウが存在するモニタの作業領域を取得
   ↓ outer_spacing を適用した利用可能領域を算出
@@ -144,30 +153,30 @@ Pause -> F 押下
 ### Window Topmost 固定 / 解除 動作フロー
 
 ```
-Pause -> T 押下
+Hotkey -> T 押下
   ↓ カーソル直下の対象ウィンドウ取得
   ↓ 現在の最前面（TopMost）状態を判定
   ↓ 状態を反転（HWND_TOPMOST ⇔ HWND_NOTOPMOST）
   ↓ カーソル周辺にトースト通知を表示
 ```
 
-- `Pause` キーを押して対象ウィンドウを選択後、`T` キーを押すことで、そのウィンドウの「最前面表示（TopMost）」の固定と解除をトグル切り替えできます。
+- ホットキーを押して対象ウィンドウを選択後、`T` キーを押すことで、そのウィンドウの「最前面表示（TopMost）」の固定と解除をトグル切り替えできます。
 - 固定されたウィンドウは、他のウィンドウを操作しても背面に隠れず最前面に表示され続けます。
-- 再度 `Pause -> T` を押すと固定が解除され、通常のウィンドウ表示に戻ります。
+- 再度 `Hotkey -> T` を押すと固定が解除され、通常のウィンドウ表示に戻ります。
 - 切り替え時には、カーソル周辺に「最前面に固定しました (TopMost: ON)」または「最前面固定を解除しました (TopMost: OFF)」のポップアップ通知が約 1.5 秒間表示されます。
 
 
 ### Window 最背面（Z-order 最下位）移動 動作フロー
 
 ```
-Pause -> B 押下
+Hotkey -> B 押下
   ↓ カーソル直下の対象ウィンドウ取得
   ↓ 最前面（TopMost）属性があれば解除 (HWND_NOTOPMOST)
   ↓ SetWindowPos(HWND_BOTTOM) で Z-order の最背面へ移動
   ↓ カーソル周辺にトースト通知を表示
 ```
 
-- `Pause` キーを押して対象ウィンドウを選択後、`B` キーを押すことで、そのウィンドウの Z-order を最下位（最背面）へ移動させます。
+- ホットキーを押して対象ウィンドウを選択後、`B` キーを押すことで、そのウィンドウの Z-order を最下位（最背面）へ移動させます。
 - 作業中のウィンドウを最小化することなく、他の重なっているウィンドウの背後へ素早く退避させたい場合に便利です。
 - 対象ウィンドウが最前面（TopMost）に固定されていた場合は、最前面固定が解除された上で最背面に移動します。
 - 実行時には、カーソル周辺に「最背面に移動しました (Send to Bottom)」のポップアップ通知が約 1.5 秒間表示されます。
@@ -175,13 +184,13 @@ Pause -> B 押下
 
 ### Window 最小化 / 最大化 / 閉じる
 
-`Pause` キーを押して対象ウィンドウを選択後、以下のキーでウィンドウ操作を行えます。
+ホットキーを押して対象ウィンドウを選択後、以下のキーでウィンドウ操作を行えます。
 
 | キー | 動作 | 説明 |
 | :--- | :--- | :--- |
-| **Pause -> I** | 最小化 | 対象ウィンドウを最小化します（タスクバーへ格納）。 |
-| **Pause -> A** | 最大化 / 元に戻す | 対象ウィンドウを最大化します（すでに最大化されている場合は元の通常サイズに戻します）。 |
-| **Pause -> X** | ウィンドウを閉じる | 対象ウィンドウへ `WM_CLOSE` を送信して閉じます（未保存ファイルがある場合は通常の保存確認が出ます）。 |
+| **Hotkey -> I** | 最小化 | 対象ウィンドウを最小化します（タスクバーへ格納）。 |
+| **Hotkey -> A** | 最大化 / 元に戻す | 対象ウィンドウを最大化します（すでに最大化されている場合は元の通常サイズに戻します）。 |
+| **Hotkey -> X** | ウィンドウを閉じる | 対象ウィンドウへ `WM_CLOSE` を送信して閉じます（未保存ファイルがある場合は通常の保存確認が出ます）。 |
 
 各操作の実行時には、カーソル周辺にポップアップ通知が表示されます。
 
@@ -189,7 +198,7 @@ Pause -> B 押下
 ### Window Snap 動作フロー
 
 ```
-Pause -> S 押下
+Hotkey -> S 押下
   ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
   ↓ スナップ選択 UI（1x1〜4x4 グリッド一覧）を表示
 [選択]
@@ -330,6 +339,6 @@ h:\prj\cs-mouse-ctrl\bin\Release\net9.0-windows\win-x64\publish\cs-mouse-ctrl.ex
 
 ## TODO
 
-### Pause -> ? to display the window process information
+### Hotkey -> ? to display the window process information
 
-### Pause -> Tab to switch the target window
+### Hotkey -> Tab to switch the target window
