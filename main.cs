@@ -518,7 +518,7 @@ class Program
         _mouseHookID = SetMouseHook(_mouseProc);
 
         // システムトレイに常駐アイコンを表示
-        _trayIcon = new TrayIcon(RequestRestart, RequestExit);
+        _trayIcon = new TrayIcon(RequestRestart, RequestExit, ExecuteHelpCommand);
 
         // 10ms タイマーでカーソル監視
         System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
@@ -1585,9 +1585,12 @@ class Program
             }
             else if (_isWaitingForNumpad)
             {
-                // NumPad 待ち受け中にクリックされたらキャンセル
+                // NumPad 待ち受け中にクリックされたらキャンセル（ヘルプポップアップ上の左クリックは項目実行のため通過）
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
+                    if (msg == WM_LBUTTONDOWN && TrayIcon.IsPointInHelpPopup(ms.pt.X, ms.pt.Y))
+                        return CallNextHookEx(_hookID, nCode, wParam, lParam);
+
                     if (msg == WM_LBUTTONDOWN) _suppressNextLButtonUp = true;
                     else if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
                     else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
@@ -1936,6 +1939,7 @@ class Program
         TrayIcon.ShowHelpPopup(autoClose: false, onClosed: CancelNumpadWaiting);
 
         _isWaitingForNumpad = true;
+        ClipActiveWindow();
     }
 
     private static void CancelNumpadWaiting()
@@ -2030,7 +2034,159 @@ class Program
             return;
         }
 
+        if (TrayIcon.GetHelpPopupBounds() is Rectangle popup)
+        {
+            rect.Left = Math.Min(rect.Left, popup.Left);
+            rect.Top = Math.Min(rect.Top, popup.Top);
+            rect.Right = Math.Max(rect.Right, popup.Right);
+            rect.Bottom = Math.Max(rect.Bottom, popup.Bottom);
+        }
+
         ClipCursor(ref rect);
+    }
+
+    private static void ExecuteHelpCommand(TrayIcon.HelpCommand cmd)
+    {
+        IntPtr target = activeWindow;
+        if (target == IntPtr.Zero)
+        {
+            IntPtr fg = GetForegroundWindow();
+            if (fg != IntPtr.Zero)
+                target = GetAncestor(fg, GA_ROOT);
+        }
+        if (target != IntPtr.Zero && IsSystemWindow(target))
+            target = IntPtr.Zero;
+
+        void EndWaitingOrClosePopup()
+        {
+            if (_isWaitingForNumpad)
+                CancelNumpadWaiting();
+            else
+                TrayIcon.CloseHelpPopup();
+        }
+
+        switch (cmd)
+        {
+            case TrayIcon.HelpCommand.Move:
+                EndWaitingOrClosePopup();
+                if (target != IntPtr.Zero)
+                    TryStartMoveMode(target);
+                break;
+
+            case TrayIcon.HelpCommand.Resize:
+                EndWaitingOrClosePopup();
+                if (target != IntPtr.Zero)
+                    TryStartResizeMode(target);
+                break;
+
+            case TrayIcon.HelpCommand.Edge:
+                if (target == IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    break;
+                }
+                if (!_isWaitingForNumpad)
+                {
+                    activeWindow = target;
+                    _isWaitingForNumpad = true;
+                }
+                StartEdgeSelecting();
+                break;
+
+            case TrayIcon.HelpCommand.Fit:
+                EndWaitingOrClosePopup();
+                if (target != IntPtr.Zero)
+                    FitWindowToLargestFreeArea(target);
+                break;
+
+            case TrayIcon.HelpCommand.Topmost:
+                if (target != IntPtr.Zero)
+                {
+                    bool isTopmost = ToggleTopmost(target);
+                    EndWaitingOrClosePopup();
+                    TrayIcon.ShowMessage(isTopmost ? "最前面に固定しました (TopMost: ON)" : "最前面固定を解除しました (TopMost: OFF)", 1500);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Bottom:
+                if (target != IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    SendToBottom(target);
+                    TrayIcon.ShowMessage("最背面に移動しました (Send to Bottom)", 1500);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Minimize:
+                if (target != IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    ShowWindow(target, SW_MINIMIZE);
+                    TrayIcon.ShowMessage("最小化しました (Minimize)", 1500);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Maximize:
+                if (target != IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    bool wasZoomed = IsZoomed(target);
+                    ShowWindow(target, wasZoomed ? SW_RESTORE : SW_MAXIMIZE);
+                    TrayIcon.ShowMessage(wasZoomed ? "元のサイズに戻しました (Restore)" : "最大化しました (Maximize)", 1500);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Close:
+                if (target != IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    PostMessage(target, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                    TrayIcon.ShowMessage("ウィンドウを閉じました (Close)", 1500);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Snap:
+                if (target != IntPtr.Zero)
+                {
+                    EndWaitingOrClosePopup();
+                    TryStartSnapMode(target);
+                }
+                else
+                {
+                    EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.MouseSpeedUp:
+                EndWaitingOrClosePopup();
+                ChangeSystemMouseSpeed(1);
+                break;
+
+            case TrayIcon.HelpCommand.MouseSpeedDown:
+                EndWaitingOrClosePopup();
+                ChangeSystemMouseSpeed(-1);
+                break;
+        }
     }
 
     private static void MoveCursorToWindowPosition(Keys key)

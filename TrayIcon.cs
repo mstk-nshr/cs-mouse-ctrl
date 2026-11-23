@@ -26,6 +26,24 @@ sealed class TrayIcon : IDisposable
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
 
+    internal enum HelpCommand
+    {
+        Move,
+        Resize,
+        Edge,
+        Fit,
+        Topmost,
+        Bottom,
+        Minimize,
+        Maximize,
+        Close,
+        Snap,
+        MouseSpeedUp,
+        MouseSpeedDown,
+    }
+
+    private readonly record struct HelpItem(string Text, HelpCommand? Command = null);
+
     private readonly NotifyIcon _notifyIcon;
     private readonly Icon _icon;
     private bool _disposed;
@@ -33,10 +51,15 @@ sealed class TrayIcon : IDisposable
     /// <summary>現在表示中のヘルプポップアップ（多重表示防止用）。</summary>
     private static HelpPopupForm? _helpPopup;
 
+    /// <summary>ヘルプ項目クリック時に実行するコマンドハンドラー。</summary>
+    private static Action<HelpCommand>? _executeCommand;
+
     /// <param name="restart">「再起動」選択時に呼び出す処理。</param>
     /// <param name="exit">「停止」選択時に呼び出す処理。</param>
-    public TrayIcon(Action restart, Action exit)
+    /// <param name="executeCommand">ヘルプ項目クリック時に呼び出す処理。</param>
+    public TrayIcon(Action restart, Action exit, Action<HelpCommand>? executeCommand = null)
     {
+        _executeCommand = executeCommand;
         _icon = CreateAppIcon();
 
         var menu = new ContextMenuStrip();
@@ -78,7 +101,7 @@ sealed class TrayIcon : IDisposable
     internal static void ShowHelpPopup(bool autoClose = true, Action? onClosed = null)
     {
         CloseHelpPopup();
-        var popup = new HelpPopupForm(BuildHelpText(), autoClose);
+        var popup = new HelpPopupForm(BuildHelpItems(), autoClose, onCommand: cmd => _executeCommand?.Invoke(cmd));
         _helpPopup = popup;
         popup.FormClosed += (_, _) =>
         {
@@ -88,6 +111,27 @@ sealed class TrayIcon : IDisposable
         };
         popup.Show();
         popup.BringToTopMost();
+    }
+
+    /// <summary>
+    /// 指定したスクリーン座標が現在表示中のヘルプポップアップ内にあるかどうかを返す。
+    /// </summary>
+    internal static bool IsPointInHelpPopup(int screenX, int screenY)
+    {
+        var popup = _helpPopup;
+        return popup != null && !popup.IsDisposed && popup.Visible
+            && popup.Bounds.Contains(screenX, screenY);
+    }
+
+    /// <summary>
+    /// 現在表示中のヘルプポップアップの境界矩形を返す（非表示時は null）。
+    /// </summary>
+    internal static Rectangle? GetHelpPopupBounds()
+    {
+        var popup = _helpPopup;
+        if (popup != null && !popup.IsDisposed && popup.Visible)
+            return popup.Bounds;
+        return null;
     }
 
     /// <summary>
@@ -147,9 +191,9 @@ sealed class TrayIcon : IDisposable
     }
 
     /// <summary>
-    /// 現在の設定（config.toml）を反映したキー割り当てのヘルプ文字列を生成する。
+    /// 現在の設定（config.toml）を反映したキー割り当てのヘルプ項目リストを生成する。
     /// </summary>
-    private static string BuildHelpText()
+    private static HelpItem[] BuildHelpItems()
     {
         // config.toml の hotkey 配列に列挙されたキーをまとめて表示する
         string pause = AppConfig.PauseKeysDisplay;
@@ -161,26 +205,29 @@ sealed class TrayIcon : IDisposable
         string minimize = AppConfig.MinimizeKey.ToString();
         string maximize = AppConfig.MaximizeKey.ToString();
         string close = AppConfig.CloseKey.ToString();
-        string snap  = AppConfig.SnapKey.ToString();
+        string snap = AppConfig.SnapKey.ToString();
 
-        return
-            $"cs_mouse_ctrl v2611.2311\n\n" +
-            $"{pause} →\n" +
-            $"    NumPad1..9:  カーソル移動\n" +
-            $"    {move}:  ウィンドウ移動\n" +
-            $"    {resize}:  ウィンドウリサイズ\n" +
-            $"    {fit}:  空きエリアへフィット\n" +
-            $"    {topmost}:  最前面固定/解除\n" +
-            $"    {bottom}:  最背面へ移動\n" +
-            $"    {minimize}:  最小化\n" + 
-            $"    {maximize}:  最大化\n" +
-            $"    {close}:  ウィンドウを閉じる\n" +
-            $"    {snap}:  スナップ選択 UI\n" +
-            $"    {AppConfig.EdgeKey}:  辺拡張（矢印で辺選択→マウスで移動、同じ矢印で境界まで拡張）\n" +
-            $"    , :  マウス移動速度の増（1..20）\n" +
-            $"    . :  マウス移動速度の減（1..20）\n" +
-            $"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +
-            $"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速";
+        return new[]
+        {
+            new HelpItem("cs_mouse_ctrl v2611.2312"),
+            new HelpItem(""),
+            new HelpItem($"{pause} →"),
+            new HelpItem("    NumPad1..9:  カーソル移動"),
+            new HelpItem($"    {move}:  ウィンドウ移動", HelpCommand.Move),
+            new HelpItem($"    {resize}:  ウィンドウリサイズ", HelpCommand.Resize),
+            new HelpItem($"    {AppConfig.EdgeKey}:  辺拡張（矢印で辺選択→マウスで移動、同じ矢印で境界まで拡張）", HelpCommand.Edge),
+            new HelpItem($"    {fit}:  空きエリアへフィット", HelpCommand.Fit),
+            new HelpItem($"    {topmost}:  最前面固定/解除", HelpCommand.Topmost),
+            new HelpItem($"    {bottom}:  最背面へ移動", HelpCommand.Bottom),
+            new HelpItem($"    {minimize}:  最小化", HelpCommand.Minimize),
+            new HelpItem($"    {maximize}:  最大化", HelpCommand.Maximize),
+            new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
+            new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
+            new HelpItem("    , :  マウス移動速度の増（1..20）", HelpCommand.MouseSpeedUp),
+            new HelpItem("    . :  マウス移動速度の減（1..20）", HelpCommand.MouseSpeedDown),
+            new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
+            new HelpItem($"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
+        };
     }
 
     public void Dispose()
@@ -263,10 +310,22 @@ sealed class TrayIcon : IDisposable
     private sealed class HelpPopupForm : Form
     {
         private readonly System.Windows.Forms.Timer? _closeTimer;
+        private readonly Font _normalFont;
+        private readonly Font _underlineFont;
+        private bool _fontsDisposed;
 
         protected override bool ShowWithoutActivation => true;
 
         public HelpPopupForm(string text, bool autoClose = true, int durationMs = 5000)
+            : this(new[] { new HelpItem(text) }, autoClose, durationMs, null)
+        {
+        }
+
+        public HelpPopupForm(
+            HelpItem[] items,
+            bool autoClose = true,
+            int durationMs = 5000,
+            Action<HelpCommand>? onCommand = null)
         {
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -275,28 +334,66 @@ sealed class TrayIcon : IDisposable
             BackColor = Color.FromArgb(32, 32, 32);
             Padding = new Padding(12);
 
-            var label = new Label
+            _normalFont = new Font("Segoe UI", 9f);
+            _underlineFont = new Font(_normalFont, FontStyle.Underline);
+
+            int y = Padding.Top;
+            int maxWidth = 0;
+            int emptyLineHeight = TextRenderer.MeasureText(" ", _normalFont).Height;
+
+            foreach (var item in items)
             {
-                Text = text,
-                AutoSize = true,
-                ForeColor = Color.White,
-                BackColor = Color.Transparent,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(Padding.Left, Padding.Top),
-            };
-            Controls.Add(label);
+                if (string.IsNullOrEmpty(item.Text))
+                {
+                    y += emptyLineHeight;
+                    continue;
+                }
+
+                var label = new Label
+                {
+                    Text = item.Text,
+                    AutoSize = true,
+                    ForeColor = Color.White,
+                    BackColor = Color.Transparent,
+                    Font = _normalFont,
+                    Location = new Point(Padding.Left, y),
+                };
+
+                if (item.Command is HelpCommand cmd && onCommand != null)
+                {
+                    label.Cursor = Cursors.Hand;
+                    label.MouseEnter += (_, _) =>
+                    {
+                        if (!IsDisposed && !label.IsDisposed && !_fontsDisposed)
+                            label.Font = _underlineFont;
+                    };
+                    label.MouseLeave += (_, _) =>
+                    {
+                        if (!IsDisposed && !label.IsDisposed && !_fontsDisposed)
+                            label.Font = _normalFont;
+                    };
+                    label.Click += (_, _) => onCommand(cmd);
+                }
+                else
+                {
+                    label.Click += (_, _) => Close();
+                }
+
+                Controls.Add(label);
+                maxWidth = Math.Max(maxWidth, label.PreferredWidth);
+                y += label.PreferredHeight;
+            }
 
             // 内容に合わせてウィンドウサイズを決定（行の欠けを防ぐ）
             ClientSize = new Size(
-                label.PreferredWidth + Padding.Horizontal,
-                label.PreferredHeight + Padding.Vertical);
+                maxWidth + Padding.Horizontal,
+                y + Padding.Bottom);
 
             // 初期位置をカーソル周辺に決定
             UpdatePosition();
 
             // クリックで閉じる
             Click += (_, _) => Close();
-            label.Click += (_, _) => Close();
 
             if (autoClose)
             {
@@ -360,7 +457,16 @@ sealed class TrayIcon : IDisposable
         {
             if (disposing)
                 _closeTimer?.Dispose();
+
+            // 子コントロール破棄（WmDestroy での MouseLeave 等）が完了してからフォントを破棄する
             base.Dispose(disposing);
+
+            if (disposing && !_fontsDisposed)
+            {
+                _fontsDisposed = true;
+                _underlineFont.Dispose();
+                _normalFont.Dispose();
+            }
         }
     }
 }
