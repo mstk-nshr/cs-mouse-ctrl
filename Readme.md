@@ -14,6 +14,7 @@
 | Hotkey -> A | maximize / restore active window |
 | Hotkey -> X | close active window |
 | Hotkey -> S | snap active window to grid position |
+| Hotkey -> E | extend an edge of active window (arrow key selects the edge) |
 | Hotkey -> . | increment mouse speed (1..20) |
 | Hotkey -> , | decrement mouse speed (1..20) |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
@@ -212,6 +213,26 @@ Hotkey -> S 押下
 - 最大化されていた場合は復元してからスナップします。
 
 
+### Window 辺拡張 動作フロー
+
+```
+Pause -> E 押下
+  ↓ 対象ウィンドウ取得・デスクトップ/タスクバー除外チェック
+[辺の選択]
+  矢印キー（← → ↑ ↓）で対象の辺を選択
+  ↓ カーソルを対象の辺の中央へ移動し、形状を <-> （左右）/ 上下矢印 に変更
+[辺の移動]
+  マウス移動 → 対象の辺がマウスに追従して移動（最小サイズ 50px）
+  選択時と同じ矢印キーをもう一度押下 → Desktop の境界まで辺を拡張して終了
+  その他のキー入力・マウスクリック・ホイール操作 → その時点の位置で終了
+```
+
+- 「Desktop の境界」は対象ウィンドウがあるモニタの作業領域（タスクバーを除く）で、`outer_spacing` を考慮した位置まで拡張します。
+- 辺選択待ちで矢印キー以外のキー（Esc を含む）を押すとキャンセルします。
+- 最大化されていた場合は復元してから辺を移動します。
+- キーリピートは無視されるため、矢印キーを押しっぱなしにしても拡張は実行されません。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -265,6 +286,10 @@ maximize_key = "A"
 # 例: "X"
 close_key = "X"
 
+# 辺拡張モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "E"
+edge_key = "E"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
@@ -288,6 +313,7 @@ inner_spacing = 10
 | `[hotkey]` | `maximize_key` | 文字列 | `"A"` | 対象ウィンドウを最大化するキー |
 | `[hotkey]` | `close_key` | 文字列 | `"X"` | 対象ウィンドウを閉じるキー |
 | `[hotkey]` | `snap_key` | 文字列 | `"S"` | ウィンドウスナップ選択 UI を起動するキー |
+| `[hotkey]` | `edge_key` | 文字列 | `"E"` | 辺拡張モードを起動するキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 

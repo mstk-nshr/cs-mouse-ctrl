@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -164,7 +164,7 @@ sealed class TrayIcon : IDisposable
         string snap  = AppConfig.SnapKey.ToString();
 
         return
-            $"cs_mouse_ctrl v261118.1300\n\n" +
+            $"cs_mouse_ctrl v2611.2311\n\n" +
             $"{pause} →\n" +
             $"    NumPad1..9:  カーソル移動\n" +
             $"    {move}:  ウィンドウ移動\n" +
@@ -176,6 +176,7 @@ sealed class TrayIcon : IDisposable
             $"    {maximize}:  最大化\n" +
             $"    {close}:  ウィンドウを閉じる\n" +
             $"    {snap}:  スナップ選択 UI\n" +
+            $"    {AppConfig.EdgeKey}:  辺拡張（矢印で辺選択→マウスで移動、同じ矢印で境界まで拡張）\n" +
             $"    , :  マウス移動速度の増（1..20）\n" +
             $"    . :  マウス移動速度の減（1..20）\n" +
             $"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速\n" +

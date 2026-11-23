@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -93,6 +93,12 @@ static class AppConfig
     public static Keys SnapKey { get; private set; } = Keys.S;
 
     /// <summary>
+    /// 辺拡張モードを起動するトリガーキー（デフォルト E）。
+    /// config.toml の [hotkey] edge_key に文字列で指定する。
+    /// </summary>
+    public static Keys EdgeKey { get; private set; } = Keys.E;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -169,6 +175,10 @@ static class AppConfig
         # ウィンドウスナップ選択 UI を起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "S"
         snap_key = "{KeysToString(SnapKey)}"
+
+        # 辺拡張モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "E"
+        edge_key = "{KeysToString(EdgeKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -324,6 +334,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         CloseKey = k;
+                }
+                if (key == "edge_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        EdgeKey = k;
                 }
                 if (key == "snap_key")
                 {

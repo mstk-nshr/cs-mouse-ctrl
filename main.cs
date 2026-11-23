@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -367,6 +367,136 @@ class Program
     private static WindowSnapForm? _snapForm;
     private static IntPtr _snapTarget = IntPtr.Zero;
 
+    // Edge Extend Mode (辺拡張) ---------------------------------------------
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+
+    private const int EDGE_MIN_SIZE = 50;
+
+    private static bool _edgeSelecting;      // Pause → E 後、矢印キーで辺を選択中
+    private static bool _isEdgeMode;         // 辺をマウスで移動中
+    private static IntPtr _edgeTarget = IntPtr.Zero;
+    private static Keys _edgeKey = Keys.None; // 選択に使った矢印キー
+    private static bool _edgeKeyReleased;    // 選択キーが一度離されたか（リピート除外）
+    private static RECT _edgeRect;
+    private static System.Drawing.Rectangle _edgeLimit; // 拡張先（モニタ作業領域）
+
+    private static bool IsArrowKey(Keys k) =>
+        k == Keys.Left || k == Keys.Right || k == Keys.Up || k == Keys.Down;
+
+    private static void StartEdgeSelecting()
+    {
+        if (activeWindow == IntPtr.Zero || IsSystemWindow(activeWindow)) { CancelNumpadWaiting(); return; }
+        _edgeSelecting = true;
+    }
+
+    private static void StartEdgeMode(Keys arrow)
+    {
+        IntPtr target = activeWindow;
+        _edgeSelecting = false;
+        CancelNumpadWaiting();
+        if (target == IntPtr.Zero || IsSystemWindow(target)) return;
+
+        if (IsZoomed(target)) ShowWindow(target, SW_RESTORE);
+        if (!GetWindowRect(target, out RECT rect)) return;
+        if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return;
+
+        SetForegroundWindow(target);
+        _edgeTarget = target;
+        _edgeRect = rect;
+        _edgeKey = arrow;
+        _edgeKeyReleased = false;
+        _edgeLimit = Screen.FromHandle(target).WorkingArea;
+        _isEdgeMode = true;
+
+        // カーソルを対象辺の中央へ移動
+        int cx = rect.Left + (rect.Right - rect.Left) / 2;
+        int cy = rect.Top + (rect.Bottom - rect.Top) / 2;
+        switch (arrow)
+        {
+            case Keys.Left:  SetCursorPos(rect.Left, cy); break;
+            case Keys.Right: SetCursorPos(rect.Right - 1, cy); break;
+            case Keys.Up:    SetCursorPos(cx, rect.Top); break;
+            default:         SetCursorPos(cx, rect.Bottom - 1); break;
+        }
+
+        ApplyEdgeCursor(arrow == Keys.Left || arrow == Keys.Right);
+    }
+
+    /// <summary>辺拡張モード中のカーソルを <-> または上下矢印にする。</summary>
+    private static void ApplyEdgeCursor(bool horizontal)
+    {
+        IntPtr shared = LoadCursor(IntPtr.Zero, (int)(horizontal ? OCR_SIZEWE : OCR_SIZENS));
+        if (shared == IntPtr.Zero) return;
+        var copies = new IntPtr[_cursorTypes.Length];
+        for (int i = 0; i < copies.Length; i++) copies[i] = CopyIcon(shared);
+        for (int i = 0; i < copies.Length; i++)
+            if (copies[i] != IntPtr.Zero) SetSystemCursor(copies[i], _cursorTypes[i]);
+        _moveCursorApplied = true;
+    }
+
+    private static void ApplyEdgeRect(RECT r)
+    {
+        _edgeRect = r;
+        SetWindowPos(_edgeTarget, IntPtr.Zero, r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    /// <summary>マウス位置に合わせて対象辺を移動する。</summary>
+    private static void UpdateEdgeFromMouse(POINT pt)
+    {
+        if (!GetWindowRect(_edgeTarget, out RECT _)) { EndEdgeMode(); return; }
+        RECT r = _edgeRect;
+        switch (_edgeKey)
+        {
+            case Keys.Left:  r.Left = Math.Min(pt.X, r.Right - EDGE_MIN_SIZE); break;
+            case Keys.Right: r.Right = Math.Max(pt.X + 1, r.Left + EDGE_MIN_SIZE); break;
+            case Keys.Up:    r.Top = Math.Min(pt.Y, r.Bottom - EDGE_MIN_SIZE); break;
+            default:         r.Bottom = Math.Max(pt.Y + 1, r.Top + EDGE_MIN_SIZE); break;
+        }
+        if (r.Left != _edgeRect.Left || r.Right != _edgeRect.Right
+            || r.Top != _edgeRect.Top || r.Bottom != _edgeRect.Bottom)
+            ApplyEdgeRect(r);
+    }
+
+    /// <summary>対象辺を Desktop（モニタ作業領域）の境界まで拡張する。</summary>
+    private static void ExtendEdgeToBoundary()
+    {
+        RECT r = _edgeRect;
+        Keys key = _edgeKey;
+        int[] outer = AppConfig.OuterSpacing; // 上, 右, 下, 左
+        switch (key)
+        {
+            case Keys.Left:  r.Left = _edgeLimit.Left + outer[3]; break;
+            case Keys.Right: r.Right = _edgeLimit.Right - outer[1]; break;
+            case Keys.Up:    r.Top = _edgeLimit.Top + outer[0]; break;
+            default:         r.Bottom = _edgeLimit.Bottom - outer[2]; break;
+        }
+        if (r.Right - r.Left < EDGE_MIN_SIZE || r.Bottom - r.Top < EDGE_MIN_SIZE) { EndEdgeMode(); return; }
+        ApplyEdgeRect(r);
+        // 先にモード終了（SetCursorPos が発生させるマウス移動で辺が再計算されないように）
+        EndEdgeMode();
+        GetCursorPos(out POINT p);
+        switch (key)
+        {
+            case Keys.Left:  SetCursorPos(r.Left, p.Y); break;
+            case Keys.Right: SetCursorPos(r.Right - 1, p.Y); break;
+            case Keys.Up:    SetCursorPos(p.X, r.Top); break;
+            default:         SetCursorPos(p.X, r.Bottom - 1); break;
+        }
+    }
+
+    private static void EndEdgeMode()
+    {
+        _edgeSelecting = false;
+        if (!_isEdgeMode) return;
+        _isEdgeMode = false;
+        _edgeTarget = IntPtr.Zero;
+        RestoreMoveCursor();
+        ResetMouseSpeedState();
+    }
+
     static void Main()
     {
         // 設定ファイルを読み込む（存在しない場合は自動生成）
@@ -409,6 +539,7 @@ class Program
             _overlay?.Close();
             CancelMoveMode();
             CloseDimOverlay();
+            EndEdgeMode();
             CloseSnapForm();
             TrayIcon.CloseHelpPopup();
 
@@ -622,6 +753,28 @@ class Program
                 }
             }
 
+            // 辺拡張モード中のキー処理
+            if (_isEdgeMode)
+            {
+                if (isKeyDown)
+                {
+                    Keys k = (Keys)vkCode;
+                    if (k == _edgeKey)
+                    {
+                        if (!_edgeKeyReleased) return (IntPtr)1; // キーリピートは無視
+                        ExtendEdgeToBoundary();
+                    }
+                    EndEdgeMode();
+                    _suppressNextKeyUp = k;
+                    return (IntPtr)1;
+                }
+                else if (isKeyUp)
+                {
+                    if ((Keys)vkCode == _edgeKey) _edgeKeyReleased = true;
+                    return (IntPtr)1;
+                }
+            }
+
             // Pause / Break キーの処理（NumPad待ちのトグル・キャンセル）
             if (IsPauseOrBreakKey((Keys)vkCode))
             {
@@ -665,6 +818,26 @@ class Program
                         CancelNumpadWaiting();
                         _suppressNextKeyUp = (Keys)vkCode;
                     }
+                    return (IntPtr)1;
+                }
+
+                // 辺拡張: E の後、矢印キーで対象の辺を選択
+                if (_edgeSelecting)
+                {
+                    if (isKeyDown)
+                    {
+                        Keys k = (Keys)vkCode;
+                        if (IsArrowKey(k)) StartEdgeMode(k);
+                        else { CancelNumpadWaiting(); _suppressNextKeyUp = k; }
+                    }
+                    return (IntPtr)1;
+                }
+
+                // pause_key → edge_key シーケンス: 辺拡張モード（矢印キー選択待ち）へ
+                if (isKeyDown && (Keys)vkCode == AppConfig.EdgeKey)
+                {
+                    StartEdgeSelecting();
+                    _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
 
@@ -1235,7 +1408,7 @@ class Program
             if (msg == WM_MOUSEMOVE)
             {
                 // --- 高速移動 (Resize Mode, Move Mode 外のみ) ---
-                if (_resizePhase == ResizePhase.None && !_isMoveMode)
+                if (_resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode)
                 {
                     // 1. 合成イベント（自身が SetCursorPos で注入したものや他ツールによる注入）は除外
                     bool isInjected = (ms.flags & (LLMHF_INJECTED | LLMHF_LOWER_IL_INJECTED)) != 0;
@@ -1364,6 +1537,10 @@ class Program
                     }
                 }
 
+                // --- Edge Extend Mode ---
+                if (_isEdgeMode)
+                    UpdateEdgeFromMouse(ms.pt);
+
                 // --- Window Move Mode ---
                 if (_isMoveMode)
                 {
@@ -1387,6 +1564,23 @@ class Program
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
                         }
                     }
+                }
+            }
+            else if (_isEdgeMode)
+            {
+                // マウスクリック等で、その時点の位置で辺拡張モードを終了
+                if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+                {
+                    if (msg == WM_LBUTTONDOWN) _suppressNextLButtonUp = true;
+                    else if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                    else _suppressNextMButtonUp = true;
+                    EndEdgeMode();
+                    return (IntPtr)1;
+                }
+                if (msg != WM_LBUTTONUP && msg != WM_RBUTTONUP && msg != WM_MBUTTONUP)
+                {
+                    EndEdgeMode(); // ホイール等
+                    return (IntPtr)1;
                 }
             }
             else if (_isWaitingForNumpad)
@@ -1749,6 +1943,7 @@ class Program
         if (!_isWaitingForNumpad) return;
         _isWaitingForNumpad = false;
         ClipCursor(IntPtr.Zero);
+        _edgeSelecting = false;
         activeWindow = IntPtr.Zero;
         CloseDimOverlay();
         TrayIcon.CloseHelpPopup();
