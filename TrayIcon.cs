@@ -38,11 +38,9 @@ sealed class TrayIcon : IDisposable
         Maximize,
         Close,
         Snap,
-        MouseSpeedUp,
-        MouseSpeedDown,
     }
 
-    private readonly record struct HelpItem(string Text, HelpCommand? Command = null);
+    private readonly record struct HelpItem(string Text, HelpCommand? Command = null, bool IsMouseSpeedRow = false);
 
     private readonly NotifyIcon _notifyIcon;
     private readonly Icon _icon;
@@ -54,12 +52,27 @@ sealed class TrayIcon : IDisposable
     /// <summary>ヘルプ項目クリック時に実行するコマンドハンドラー。</summary>
     private static Action<HelpCommand>? _executeCommand;
 
+    /// <summary>現在のマウス速度（1..20）を取得するハンドラー。</summary>
+    private static Func<int>? _getMouseSpeed;
+
+    /// <summary>マウス速度（1..20）を設定するハンドラー。</summary>
+    private static Func<int, int>? _setMouseSpeed;
+
     /// <param name="restart">「再起動」選択時に呼び出す処理。</param>
     /// <param name="exit">「停止」選択時に呼び出す処理。</param>
     /// <param name="executeCommand">ヘルプ項目クリック時に呼び出す処理。</param>
-    public TrayIcon(Action restart, Action exit, Action<HelpCommand>? executeCommand = null)
+    /// <param name="getMouseSpeed">現在のマウス速度を取得する処理。</param>
+    /// <param name="setMouseSpeed">マウス速度を設定する処理。</param>
+    public TrayIcon(
+        Action restart,
+        Action exit,
+        Action<HelpCommand>? executeCommand = null,
+        Func<int>? getMouseSpeed = null,
+        Func<int, int>? setMouseSpeed = null)
     {
         _executeCommand = executeCommand;
+        _getMouseSpeed = getMouseSpeed;
+        _setMouseSpeed = setMouseSpeed;
         _icon = CreateAppIcon();
 
         var menu = new ContextMenuStrip();
@@ -101,7 +114,12 @@ sealed class TrayIcon : IDisposable
     internal static void ShowHelpPopup(bool autoClose = true, Action? onClosed = null)
     {
         CloseHelpPopup();
-        var popup = new HelpPopupForm(BuildHelpItems(), autoClose, onCommand: cmd => _executeCommand?.Invoke(cmd));
+        var popup = new HelpPopupForm(
+            BuildHelpItems(),
+            autoClose,
+            onCommand: cmd => _executeCommand?.Invoke(cmd),
+            getMouseSpeed: _getMouseSpeed,
+            setMouseSpeed: _setMouseSpeed);
         _helpPopup = popup;
         popup.FormClosed += (_, _) =>
         {
@@ -121,6 +139,18 @@ sealed class TrayIcon : IDisposable
         var popup = _helpPopup;
         return popup != null && !popup.IsDisposed && popup.Visible
             && popup.Bounds.Contains(screenX, screenY);
+    }
+
+    /// <summary>
+    /// 低レベルマウスフックからのイベントをヘルプポップアップ内の速度操作コントロールへ直接ルーティングする。
+    /// イベントを消費すべき場合は true を返す。
+    /// </summary>
+    internal static bool TryHandleHelpPopupMouse(int msg, int screenX, int screenY)
+    {
+        var popup = _helpPopup;
+        if (popup == null || popup.IsDisposed || !popup.Visible)
+            return false;
+        return popup.TryHandleHookMouse(msg, screenX, screenY);
     }
 
     /// <summary>
@@ -209,7 +239,7 @@ sealed class TrayIcon : IDisposable
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2312"),
+            new HelpItem("cs_mouse_ctrl v2611.2317"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
@@ -223,8 +253,7 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {maximize}:  最大化", HelpCommand.Maximize),
             new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
             new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
-            new HelpItem("    , :  マウス移動速度の増（1..20）", HelpCommand.MouseSpeedUp),
-            new HelpItem("    . :  マウス移動速度の減（1..20）", HelpCommand.MouseSpeedDown),
+            new HelpItem("    , / . :  マウス移動速度", IsMouseSpeedRow: true),
             new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
             new HelpItem($"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
         };
@@ -309,10 +338,20 @@ sealed class TrayIcon : IDisposable
     /// </summary>
     private sealed class HelpPopupForm : Form
     {
+        private const int WM_MOUSEMOVE = 0x0200;
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_LBUTTONUP = 0x0202;
+        private const int WM_MOUSEACTIVATE = 0x0021;
+        private const int MA_NOACTIVATE = 3;
+
         private readonly System.Windows.Forms.Timer? _closeTimer;
         private readonly Font _normalFont;
         private readonly Font _underlineFont;
         private bool _fontsDisposed;
+
+        private StepButtonControl? _minusBtn;
+        private StepButtonControl? _plusBtn;
+        private SpeedSliderControl? _slider;
 
         protected override bool ShowWithoutActivation => true;
 
@@ -325,7 +364,9 @@ sealed class TrayIcon : IDisposable
             HelpItem[] items,
             bool autoClose = true,
             int durationMs = 5000,
-            Action<HelpCommand>? onCommand = null)
+            Action<HelpCommand>? onCommand = null,
+            Func<int>? getMouseSpeed = null,
+            Func<int, int>? setMouseSpeed = null)
         {
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -346,6 +387,14 @@ sealed class TrayIcon : IDisposable
                 if (string.IsNullOrEmpty(item.Text))
                 {
                     y += emptyLineHeight;
+                    continue;
+                }
+
+                if (item.IsMouseSpeedRow)
+                {
+                    int rowWidth = AddMouseSpeedRow(item.Text, y, getMouseSpeed, setMouseSpeed, out int rowHeight);
+                    maxWidth = Math.Max(maxWidth, rowWidth);
+                    y += rowHeight;
                     continue;
                 }
 
@@ -404,6 +453,429 @@ sealed class TrayIcon : IDisposable
             }
         }
 
+        private int AddMouseSpeedRow(
+            string title,
+            int y,
+            Func<int>? getMouseSpeed,
+            Func<int, int>? setMouseSpeed,
+            out int rowHeight)
+        {
+            int currentSpeed = Math.Clamp(getMouseSpeed?.Invoke() ?? 10, 1, 20);
+
+            var titleLabel = new Label
+            {
+                Text = title,
+                AutoSize = true,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent,
+                Font = _normalFont,
+                Location = new Point(Padding.Left, y + 2),
+            };
+            Controls.Add(titleLabel);
+
+            int ctrlHeight = Math.Max(20, titleLabel.PreferredHeight + 2);
+            rowHeight = ctrlHeight + 2;
+
+            int x = Padding.Left + titleLabel.PreferredWidth + 8;
+
+            var minusBtn = new StepButtonControl("-", _normalFont, _underlineFont)
+            {
+                Location = new Point(x, y),
+                Size = new Size(22, ctrlHeight),
+            };
+            x += minusBtn.Width + 4;
+
+            var slider = new SpeedSliderControl(currentSpeed)
+            {
+                Location = new Point(x, y),
+                Size = new Size(120, ctrlHeight),
+            };
+            x += slider.Width + 4;
+
+            var plusBtn = new StepButtonControl("+", _normalFont, _underlineFont)
+            {
+                Location = new Point(x, y),
+                Size = new Size(22, ctrlHeight),
+            };
+            x += plusBtn.Width + 6;
+
+            var valueLabel = new Label
+            {
+                Text = currentSpeed.ToString(),
+                AutoSize = false,
+                Size = new Size(22, ctrlHeight),
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = Color.FromArgb(120, 190, 255),
+                BackColor = Color.Transparent,
+                Font = _normalFont,
+                Location = new Point(x, y),
+            };
+            x += valueLabel.Width;
+
+            void ApplySpeed(int newSpeed)
+            {
+                int applied = setMouseSpeed != null
+                    ? setMouseSpeed(newSpeed)
+                    : Math.Clamp(newSpeed, 1, 20);
+                slider.SetValue(applied);
+                valueLabel.Text = applied.ToString();
+                slider.Refresh();
+                valueLabel.Refresh();
+                if (_closeTimer != null)
+                {
+                    _closeTimer.Stop();
+                    _closeTimer.Start();
+                }
+            }
+
+            minusBtn.StepTriggered += (_, _) => ApplySpeed(slider.Value - 1);
+            plusBtn.StepTriggered += (_, _) => ApplySpeed(slider.Value + 1);
+            slider.ValueChanged += (_, newVal) => ApplySpeed(newVal);
+
+            _minusBtn = minusBtn;
+            _plusBtn = plusBtn;
+            _slider = slider;
+
+            Controls.Add(minusBtn);
+            Controls.Add(slider);
+            Controls.Add(plusBtn);
+            Controls.Add(valueLabel);
+
+            return x - Padding.Left;
+        }
+
+        public bool TryHandleHookMouse(int msg, int screenX, int screenY)
+        {
+            if (IsDisposed || !Visible) return false;
+            var pt = new Point(screenX, screenY);
+
+            if (msg == WM_LBUTTONDOWN)
+            {
+                if (_minusBtn != null && !_minusBtn.IsDisposed
+                    && _minusBtn.RectangleToScreen(_minusBtn.ClientRectangle).Contains(pt))
+                {
+                    _minusBtn.PressStart();
+                    return true;
+                }
+                if (_plusBtn != null && !_plusBtn.IsDisposed
+                    && _plusBtn.RectangleToScreen(_plusBtn.ClientRectangle).Contains(pt))
+                {
+                    _plusBtn.PressStart();
+                    return true;
+                }
+                if (_slider != null && !_slider.IsDisposed
+                    && _slider.RectangleToScreen(_slider.ClientRectangle).Contains(pt))
+                {
+                    _slider.BeginDragFromScreenX(screenX);
+                    return true;
+                }
+                return false;
+            }
+
+            if (msg == WM_MOUSEMOVE)
+            {
+                if (_slider != null && !_slider.IsDisposed && _slider.IsDragging)
+                    _slider.DragFromScreenX(screenX);
+                return false;
+            }
+
+            if (msg == WM_LBUTTONUP)
+            {
+                bool handled = false;
+                if (_minusBtn != null && !_minusBtn.IsDisposed && _minusBtn.IsPressed)
+                {
+                    _minusBtn.PressEnd();
+                    handled = true;
+                }
+                if (_plusBtn != null && !_plusBtn.IsDisposed && _plusBtn.IsPressed)
+                {
+                    _plusBtn.PressEnd();
+                    handled = true;
+                }
+                if (_slider != null && !_slider.IsDisposed && _slider.IsDragging)
+                {
+                    _slider.EndDrag();
+                    handled = true;
+                }
+                return handled;
+            }
+
+            return false;
+        }
+
+        private sealed class StepButtonControl : Control
+        {
+            private readonly Font _normalFont;
+            private readonly Font _underlineFont;
+            private readonly System.Windows.Forms.Timer _repeatTimer;
+            private bool _hovered;
+            private bool _pressed;
+
+            public bool IsPressed => _pressed;
+            public event EventHandler? StepTriggered;
+
+            public void PressStart()
+            {
+                if (IsDisposed) return;
+                _pressed = true;
+                Refresh();
+                StepTriggered?.Invoke(this, EventArgs.Empty);
+                _repeatTimer.Interval = 350;
+                _repeatTimer.Start();
+            }
+
+            public void PressEnd()
+            {
+                if (IsDisposed || !_pressed) return;
+                _pressed = false;
+                _repeatTimer.Stop();
+                Refresh();
+            }
+
+            public StepButtonControl(string text, Font normalFont, Font underlineFont)
+            {
+                Text = text;
+                _normalFont = normalFont;
+                _underlineFont = underlineFont;
+                SetStyle(
+                    ControlStyles.AllPaintingInWmPaint
+                    | ControlStyles.UserPaint
+                    | ControlStyles.OptimizedDoubleBuffer
+                    | ControlStyles.ResizeRedraw,
+                    true);
+                Cursor = Cursors.Hand;
+
+                _repeatTimer = new System.Windows.Forms.Timer { Interval = 350 };
+                _repeatTimer.Tick += (_, _) =>
+                {
+                    _repeatTimer.Interval = 80;
+                    StepTriggered?.Invoke(this, EventArgs.Empty);
+                };
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                _hovered = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                _hovered = false;
+                _pressed = false;
+                _repeatTimer.Stop();
+                Invalidate();
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                base.OnMouseDown(e);
+                if (e.Button == MouseButtons.Left)
+                    PressStart();
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                base.OnMouseUp(e);
+                if (e.Button == MouseButtons.Left)
+                    PressEnd();
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                var bg = _pressed
+                    ? Color.FromArgb(0, 120, 255)
+                    : _hovered
+                        ? Color.FromArgb(75, 75, 75)
+                        : Color.FromArgb(52, 52, 52);
+
+                using (var brush = new SolidBrush(bg))
+                    e.Graphics.FillRectangle(brush, ClientRectangle);
+
+                var font = _hovered ? _underlineFont : _normalFont;
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    Text,
+                    font,
+                    ClientRectangle,
+                    Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                    _repeatTimer.Dispose();
+                base.Dispose(disposing);
+            }
+        }
+
+        private sealed class SpeedSliderControl : Control
+        {
+            private int _value;
+            private bool _hovered;
+            private bool _dragging;
+
+            public int Value => _value;
+            public bool IsDragging => _dragging;
+            public event EventHandler<int>? ValueChanged;
+
+            public void BeginDragFromScreenX(int screenX)
+            {
+                if (IsDisposed) return;
+                _dragging = true;
+                int localX = PointToClient(new Point(screenX, 0)).X;
+                UpdateFromX(localX);
+                Refresh();
+            }
+
+            public void DragFromScreenX(int screenX)
+            {
+                if (IsDisposed || !_dragging) return;
+                int localX = PointToClient(new Point(screenX, 0)).X;
+                UpdateFromX(localX);
+            }
+
+            public void EndDrag()
+            {
+                if (IsDisposed || !_dragging) return;
+                _dragging = false;
+                Capture = false;
+                Refresh();
+            }
+
+            public SpeedSliderControl(int initialValue)
+            {
+                _value = Math.Clamp(initialValue, 1, 20);
+                SetStyle(
+                    ControlStyles.AllPaintingInWmPaint
+                    | ControlStyles.UserPaint
+                    | ControlStyles.OptimizedDoubleBuffer
+                    | ControlStyles.ResizeRedraw,
+                    true);
+                BackColor = Color.FromArgb(32, 32, 32);
+                Cursor = Cursors.Hand;
+            }
+
+            public void SetValue(int value)
+            {
+                int clamped = Math.Clamp(value, 1, 20);
+                if (clamped == _value) return;
+                _value = clamped;
+                Invalidate();
+            }
+
+            private void UpdateFromX(int x)
+            {
+                const int pad = 8;
+                int trackWidth = Math.Max(1, Width - pad * 2);
+                double ratio = Math.Clamp((double)(x - pad) / trackWidth, 0.0, 1.0);
+                int newVal = 1 + (int)Math.Round(ratio * 19.0);
+                if (newVal != _value)
+                {
+                    _value = newVal;
+                    Invalidate();
+                    ValueChanged?.Invoke(this, _value);
+                }
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                _hovered = true;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                _hovered = false;
+                Invalidate();
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                base.OnMouseDown(e);
+                if (e.Button == MouseButtons.Left)
+                {
+                    _dragging = true;
+                    Capture = true;
+                    UpdateFromX(e.X);
+                }
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                base.OnMouseMove(e);
+                if (_dragging)
+                    UpdateFromX(e.X);
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                base.OnMouseUp(e);
+                if (_dragging && e.Button == MouseButtons.Left)
+                {
+                    _dragging = false;
+                    Capture = false;
+                    Invalidate();
+                }
+            }
+
+            protected override void OnMouseWheel(MouseEventArgs e)
+            {
+                base.OnMouseWheel(e);
+                int next = Math.Clamp(_value + (e.Delta > 0 ? 1 : -1), 1, 20);
+                if (next != _value)
+                {
+                    _value = next;
+                    Invalidate();
+                    ValueChanged?.Invoke(this, _value);
+                }
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+                var g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                const int pad = 8;
+                int cy = Height / 2;
+                int trackLeft = pad;
+                int trackRight = Math.Max(pad + 1, Width - pad);
+                float ratio = (_value - 1) / 19f;
+                int thumbX = trackLeft + (int)Math.Round((trackRight - trackLeft) * ratio);
+
+                using var bgPen = new Pen(Color.FromArgb(90, 90, 90), 4f)
+                {
+                    StartCap = LineCap.Round,
+                    EndCap = LineCap.Round,
+                };
+                g.DrawLine(bgPen, trackLeft, cy, trackRight, cy);
+
+                if (thumbX > trackLeft)
+                {
+                    using var activePen = new Pen(Color.FromArgb(0, 120, 255), 4f)
+                    {
+                        StartCap = LineCap.Round,
+                        EndCap = LineCap.Round,
+                    };
+                    g.DrawLine(activePen, trackLeft, cy, thumbX, cy);
+                }
+
+                int r = (_hovered || _dragging) ? 6 : 5;
+                var thumbRect = new Rectangle(thumbX - r, cy - r, r * 2, r * 2);
+                using var thumbBrush = new SolidBrush(Color.White);
+                using var thumbPen = new Pen(Color.FromArgb(0, 120, 255), 1.5f);
+                g.FillEllipse(thumbBrush, thumbRect);
+                g.DrawEllipse(thumbPen, thumbRect);
+            }
+        }
+
         private void UpdatePosition()
         {
             Point cursorPt = Cursor.Position;
@@ -451,6 +923,16 @@ sealed class TrayIcon : IDisposable
                 cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
                 return cp;
             }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_MOUSEACTIVATE)
+            {
+                m.Result = (IntPtr)MA_NOACTIVATE;
+                return;
+            }
+            base.WndProc(ref m);
         }
 
         protected override void Dispose(bool disposing)

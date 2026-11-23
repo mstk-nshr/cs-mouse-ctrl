@@ -242,14 +242,30 @@ class Program
     private const uint SPI_SETMOUSESPEED = 0x0071;
     private const uint SPIF_UPDATEINIFILE = 0x01;
 
+    /// <summary>Windows 標準のマウスポインター速度（1〜20）を取得する。</summary>
+    private static int GetSystemMouseSpeed()
+    {
+        int cur = 0;
+        if (!SystemParametersInfo(SPI_GETMOUSESPEED, 0, ref cur, 0))
+            return 10;
+        return Math.Clamp(cur, 1, 20);
+    }
+
+    /// <summary>Windows 標準のマウスポインター速度（1〜20）を指定値に変更する。</summary>
+    private static int SetSystemMouseSpeed(int speed)
+    {
+        int next = Math.Clamp(speed, 1, 20);
+        // SPIF_SENDCHANGE は全トップレベルウィンドウへ同期ブロードキャストするため、
+        // スライダーやボタン連続操作時の UI ブロックを避けるべく SPIF_UPDATEINIFILE のみ指定する。
+        SystemParametersInfo(SPI_SETMOUSESPEED, 0, (IntPtr)next, SPIF_UPDATEINIFILE);
+        return next;
+    }
+
     /// <summary>Windows 標準のマウスポインター速度（1〜20）を delta 段階変更し、結果を 2 秒表示する。</summary>
     private static void ChangeSystemMouseSpeed(int delta)
     {
-        int cur = 0;
-        if (!SystemParametersInfo(SPI_GETMOUSESPEED, 0, ref cur, 0)) return;
-        int next = Math.Clamp(cur + delta, 1, 20);
-        if (next != cur)
-            SystemParametersInfo(SPI_SETMOUSESPEED, 0, (IntPtr)next, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+        int cur = GetSystemMouseSpeed();
+        int next = SetSystemMouseSpeed(cur + delta);
         TrayIcon.ShowMessage($"マウス速度: {cur} → {next}" + (next == cur ? " (限界)" : ""), 2000);
     }
     private static void ResetMouseSpeedState()
@@ -518,7 +534,12 @@ class Program
         _mouseHookID = SetMouseHook(_mouseProc);
 
         // システムトレイに常駐アイコンを表示
-        _trayIcon = new TrayIcon(RequestRestart, RequestExit, ExecuteHelpCommand);
+        _trayIcon = new TrayIcon(
+            RequestRestart,
+            RequestExit,
+            ExecuteHelpCommand,
+            GetSystemMouseSpeed,
+            SetSystemMouseSpeed);
 
         // 10ms タイマーでカーソル監視
         System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
@@ -1407,6 +1428,9 @@ class Program
 
             if (msg == WM_MOUSEMOVE)
             {
+                if (_isWaitingForNumpad)
+                    TrayIcon.TryHandleHelpPopupMouse(msg, ms.pt.X, ms.pt.Y);
+
                 // --- 高速移動 (Resize Mode, Move Mode 外のみ) ---
                 if (_resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode)
                 {
@@ -1585,11 +1609,18 @@ class Program
             }
             else if (_isWaitingForNumpad)
             {
+                // ヘルプポップアップ内のマウス速度コントロール（- / スライダー / +）はフックから直接処理
+                if ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP)
+                    && TrayIcon.TryHandleHelpPopupMouse(msg, ms.pt.X, ms.pt.Y))
+                {
+                    return (IntPtr)1;
+                }
+
                 // NumPad 待ち受け中にクリックされたらキャンセル（ヘルプポップアップ上の左クリックは項目実行のため通過）
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
                     if (msg == WM_LBUTTONDOWN && TrayIcon.IsPointInHelpPopup(ms.pt.X, ms.pt.Y))
-                        return CallNextHookEx(_hookID, nCode, wParam, lParam);
+                        return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
 
                     if (msg == WM_LBUTTONDOWN) _suppressNextLButtonUp = true;
                     else if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
@@ -2175,16 +2206,6 @@ class Program
                 {
                     EndWaitingOrClosePopup();
                 }
-                break;
-
-            case TrayIcon.HelpCommand.MouseSpeedUp:
-                EndWaitingOrClosePopup();
-                ChangeSystemMouseSpeed(1);
-                break;
-
-            case TrayIcon.HelpCommand.MouseSpeedDown:
-                EndWaitingOrClosePopup();
-                ChangeSystemMouseSpeed(-1);
                 break;
         }
     }
