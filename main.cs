@@ -380,7 +380,9 @@ class Program
     private const uint SWP_SHOWWINDOW = 0x0040;
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TOPMOST = 0x00000008;
+    private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_LAYERED = 0x00080000;
     private const int WS_EX_NOACTIVATE = 0x08000000;
 
     private static DimOverlayForm? _dimOverlay;
@@ -398,6 +400,14 @@ class Program
     private static bool _isSwapMode;
     private static IntPtr _swapFirstTarget = IntPtr.Zero;
     private static OverlayForm? _swapOverlay;
+
+    // Window Set Mode (複数アプリの登録・一括起動＆配置復元) -----------------
+
+    private enum WindowSetPhase { None, Menu, Registering }
+    private static WindowSetPhase _windowSetPhase = WindowSetPhase.None;
+    private static bool _windowSetTriggerReleased = true;
+    private static readonly System.Collections.Generic.List<(IntPtr HWnd, OverlayForm Overlay)> _windowSetSelections = new();
+    private static SynchronizationContext? _uiContext;
 
     // Edge Extend Mode (辺拡張) ---------------------------------------------
 
@@ -549,6 +559,11 @@ class Program
         _hookID = SetHook(_proc);
         _mouseHookID = SetMouseHook(_mouseProc);
 
+        // UI スレッド用の SynchronizationContext を確保（バックグラウンド通知用）
+        var uiCtx = new WindowsFormsSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(uiCtx);
+        _uiContext = uiCtx;
+
         // システムトレイに常駐アイコンを表示
         _trayIcon = new TrayIcon(
             RequestRestart,
@@ -576,6 +591,7 @@ class Program
             _overlay?.Close();
             CancelMoveMode();
             CancelSwapMode();
+            CancelWindowSetMode();
             CloseDimOverlay();
             EndEdgeMode();
             CloseSnapForm();
@@ -760,6 +776,10 @@ class Program
                 }
             }
 
+            // Window Set トリガーキーの解放状態を追跡（キーリピートによる誤遷移を防止）
+            if (isKeyUp && (Keys)vkCode == AppConfig.WindowSetKey)
+                _windowSetTriggerReleased = true;
+
             // 直前に消費したキーの KeyUp を抑制
             if (isKeyUp && _suppressNextKeyUp != Keys.None && (Keys)vkCode == _suppressNextKeyUp)
             {
@@ -832,10 +852,62 @@ class Program
                 }
             }
 
+            // Window Set モード中のキー処理（一覧待ち / 登録モード）
+            if (_windowSetPhase != WindowSetPhase.None)
+            {
+                Keys k = (Keys)vkCode;
+                if (!IsModifierKey(k))
+                {
+                    if (isKeyDown)
+                    {
+                        _suppressNextKeyUp = k;
+                        if (_windowSetPhase == WindowSetPhase.Menu)
+                        {
+                            if (k == Keys.Escape || IsPauseOrBreakKey(k))
+                            {
+                                CancelWindowSetMode();
+                            }
+                            else if (k == AppConfig.WindowSetKey)
+                            {
+                                if (!_windowSetTriggerReleased) return (IntPtr)1;
+                                StartWindowSetRegisterMode(fromKeyboard: true);
+                            }
+                            else
+                            {
+                                ExecuteWindowSet(k);
+                            }
+                        }
+                        else if (_windowSetPhase == WindowSetPhase.Registering)
+                        {
+                            if (k == Keys.Escape || IsPauseOrBreakKey(k))
+                            {
+                                CancelWindowSetMode(showCancelToast: true);
+                            }
+                            else if (k == AppConfig.WindowSetKey)
+                            {
+                                if (!_windowSetTriggerReleased) return (IntPtr)1;
+                                string trigName = AppConfig.KeysToWindowSetName(AppConfig.WindowSetKey);
+                                UpdateWindowSetRegisterStatus(
+                                    hintOverride: $"'{trigName}' 以外のキーを押して登録してください");
+                            }
+                            else
+                            {
+                                CompleteWindowSetRegistration(k);
+                            }
+                        }
+                        return (IntPtr)1;
+                    }
+                    else if (isKeyUp)
+                    {
+                        return (IntPtr)1;
+                    }
+                }
+            }
+
             // Pause / Break キーの処理（NumPad待ちのトグル・キャンセル）
             if (IsPauseOrBreakKey((Keys)vkCode))
             {
-                if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode && !_isSwapMode)
+                if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode && !_isSwapMode && _windowSetPhase == WindowSetPhase.None)
                 {
                     long now = Stopwatch.GetTimestamp();
                     if (_lastPauseTick == 0 || Stopwatch.GetElapsedTime(_lastPauseTick, now).TotalMilliseconds >= 150)
@@ -1054,6 +1126,15 @@ class Program
                     _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
+
+                // pause_key → window_set_key シーケンス: NumPad 待ち中に window_set_key が押されたら Window Set 機能へ
+                if (isKeyDown && (Keys)vkCode == AppConfig.WindowSetKey)
+                {
+                    CancelNumpadWaiting();
+                    StartWindowSetMenuMode(fromKeyboard: true);
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
             }
         }
 
@@ -1066,8 +1147,8 @@ class Program
 
     private static void TryStartMoveMode(IntPtr preferredTarget = default)
     {
-        // 既に移動モード・リサイズモード・入れ替えモード中なら無視
-        if (_isMoveMode || _resizePhase != ResizePhase.None || _isSwapMode) return;
+        // 既に移動モード・リサイズモード・入れ替えモード・Window Set モード中なら無視
+        if (_isMoveMode || _resizePhase != ResizePhase.None || _isSwapMode || _windowSetPhase != WindowSetPhase.None) return;
 
         IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
 
@@ -1417,7 +1498,7 @@ class Program
 
     private static void TryStartSwapMode(IntPtr target)
     {
-        if (_isSwapMode || _isMoveMode || _resizePhase != ResizePhase.None || _isEdgeMode) return;
+        if (_isSwapMode || _isMoveMode || _resizePhase != ResizePhase.None || _isEdgeMode || _windowSetPhase != WindowSetPhase.None) return;
         if (target == IntPtr.Zero) return;
 
         IntPtr rootWnd = GetAncestor(target, GA_ROOT);
@@ -1565,8 +1646,8 @@ class Program
 
     private static void TryStartResizeMode(IntPtr preferredTarget = default)
     {
-        // 既にリサイズモード中・移動モード中・入れ替えモード中なら無視
-        if (_resizePhase != ResizePhase.None || _isMoveMode || _isSwapMode) return;
+        // 既にリサイズモード中・移動モード中・入れ替えモード・Window Set モード中なら無視
+        if (_resizePhase != ResizePhase.None || _isMoveMode || _isSwapMode || _windowSetPhase != WindowSetPhase.None) return;
 
         IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
 
@@ -1848,6 +1929,41 @@ class Program
 
                 CancelSwapMode();
                 return (IntPtr)1;
+            }
+            else if (_windowSetPhase == WindowSetPhase.Registering)
+            {
+                if (msg == WM_LBUTTONDOWN)
+                {
+                    _suppressNextLButtonUp = true;
+                    ToggleWindowSetSelectionAt(ms.pt);
+                    return (IntPtr)1;
+                }
+                if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP || msg == WM_MBUTTONUP)
+                {
+                    return (IntPtr)1;
+                }
+                if (msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+                {
+                    if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                    else _suppressNextMButtonUp = true;
+                    CancelWindowSetMode(showCancelToast: true);
+                    return (IntPtr)1;
+                }
+            }
+            else if (_windowSetPhase == WindowSetPhase.Menu)
+            {
+                if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
+                {
+                    if (msg == WM_LBUTTONDOWN && TrayIcon.IsPointInHelpPopup(ms.pt.X, ms.pt.Y))
+                        return CallNextHookEx(_mouseHookID, nCode, wParam, lParam);
+
+                    if (msg == WM_LBUTTONDOWN) _suppressNextLButtonUp = true;
+                    else if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                    else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
+
+                    CancelWindowSetMode();
+                    return (IntPtr)1;
+                }
             }
             else if (_isWaitingForNumpad)
             {
@@ -2465,6 +2581,11 @@ class Program
                         TryStartSwapMode(swapTarget);
                 }
                 break;
+
+            case TrayIcon.HelpCommand.WindowSet:
+                EndWaitingOrClosePopup();
+                StartWindowSetMenuMode();
+                break;
         }
     }
 
@@ -2626,6 +2747,238 @@ class Program
     {
         CloseSnapForm();
     }
+
+    // -----------------------------------------------------------------------
+    // Window Set Mode (複数アプリの登録・一覧表示・一括起動＆復元)
+    // -----------------------------------------------------------------------
+
+    private static void StartWindowSetMenuMode(bool fromKeyboard = false)
+    {
+        if (_windowSetPhase != WindowSetPhase.None || _isMoveMode || _resizePhase != ResizePhase.None || _isEdgeMode || _isSwapMode)
+            return;
+
+        _windowSetTriggerReleased = !fromKeyboard;
+        _windowSetPhase = WindowSetPhase.Menu;
+        TrayIcon.ShowWindowSetPopup(
+            AppConfig.WindowSets,
+            AppConfig.WindowSetKey,
+            onRegister: () => StartWindowSetRegisterMode(fromKeyboard: false),
+            onLaunch: ExecuteWindowSet,
+            onClosed: () =>
+            {
+                if (_windowSetPhase == WindowSetPhase.Menu)
+                    CancelWindowSetMode();
+            });
+    }
+
+    private static void StartWindowSetRegisterMode(bool fromKeyboard = false)
+    {
+        if (_windowSetPhase == WindowSetPhase.Registering) return;
+
+        ClearWindowSetOverlays();
+        _windowSetTriggerReleased = !fromKeyboard;
+        _windowSetPhase = WindowSetPhase.Registering;
+        ApplySwapCursor();
+        UpdateWindowSetRegisterStatus();
+    }
+
+    private static void ToggleWindowSetSelectionAt(POINT pt)
+    {
+        if (_windowSetPhase != WindowSetPhase.Registering) return;
+
+        IntPtr target = FindTopmostSelectableWindowAt(pt);
+        if (target == IntPtr.Zero)
+            return;
+
+        // すでに選択済みなら解除（トグル）
+        int existingIdx = _windowSetSelections.FindIndex(x => x.HWnd == target);
+        if (existingIdx >= 0)
+        {
+            var ov = _windowSetSelections[existingIdx].Overlay;
+            _windowSetSelections.RemoveAt(existingIdx);
+            CloseSingleOverlay(ov);
+            UpdateWindowSetRegisterStatus();
+            return;
+        }
+
+        if (!GetWindowRect(target, out RECT rect)) return;
+        if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return;
+
+        var overlay = new OverlayForm(fillColor: WindowSetManager.GetAccentColor());
+        overlay.UpdateRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        overlay.Show();
+        overlay.BringToTopMost();
+
+        _windowSetSelections.Add((target, overlay));
+        UpdateWindowSetRegisterStatus();
+    }
+
+    /// <summary>
+    /// 指定スクリーン座標で最前面にある選択可能なトップレベルウィンドウを Z-order 順に探索する。
+    /// 自アプリのオーバーレイやポップアップは無視し、最前面がタスクバーやデスクトップなら IntPtr.Zero を返す。
+    /// </summary>
+    private static IntPtr FindTopmostSelectableWindowAt(POINT pt)
+    {
+        IntPtr found = IntPtr.Zero;
+
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindowVisible(hWnd) || IsIconic(hWnd))
+                return true;
+            if (IsOwnProcessWindow(hWnd))
+                return true;
+
+            int exStyle = GetWindowLong(hWnd, GWL_EXSTYLE);
+            // 他アプリのクリック透過オーバーレイは素通り
+            if ((exStyle & (WS_EX_LAYERED | WS_EX_TRANSPARENT)) == (WS_EX_LAYERED | WS_EX_TRANSPARENT))
+                return true;
+
+            if (DwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0
+                && cloaked != 0)
+                return true;
+
+            if (!GetWindowRect(hWnd, out RECT rect))
+                return true;
+            if (rect.Right <= rect.Left || rect.Bottom <= rect.Top)
+                return true;
+
+            if (pt.X < rect.Left || pt.X >= rect.Right || pt.Y < rect.Top || pt.Y >= rect.Bottom)
+                return true;
+
+            // タスクバーやデスクトップ背景に当たった場合はそこで探索終了
+            if (IsSystemWindow(hWnd))
+                return false;
+
+            if ((exStyle & WS_EX_TOOLWINDOW) != 0)
+                return true;
+
+            found = hWnd;
+            return false;
+        }, IntPtr.Zero);
+
+        return found;
+    }
+
+    private static void UpdateWindowSetRegisterStatus(string? hintOverride = null)
+    {
+        if (_windowSetPhase != WindowSetPhase.Registering) return;
+
+        string trigName = AppConfig.KeysToWindowSetName(AppConfig.WindowSetKey);
+        int count = _windowSetSelections.Count;
+        string selectedSummary = count == 0
+            ? ""
+            : "\n選択中: " + string.Join(", ",
+                _windowSetSelections.Select(x => WindowSetManager.GetWindowAppDisplayName(x.HWnd)));
+
+        string hint = hintOverride ?? $"'{trigName}' 以外のキー押下: 呼び出しキーとして登録 / Esc・右クリック: キャンセル";
+        string text = $"Window Set 登録モード ({count} 件選択中){selectedSummary}\n左クリック: ウィンドウ選択/解除\n{hint}";
+
+        TrayIcon.ShowMessage(text, durationMs: 0, clickThrough: true);
+        TrayIcon.BringHelpPopupToTopMost();
+    }
+
+    private static void CompleteWindowSetRegistration(Keys recallKey)
+    {
+        if (_windowSetPhase != WindowSetPhase.Registering) return;
+
+        var selectedHandles = _windowSetSelections.Select(x => x.HWnd).ToList();
+        _windowSetPhase = WindowSetPhase.None;
+        ClearWindowSetOverlays();
+        TrayIcon.CloseHelpPopup();
+        RestoreMoveCursor();
+        ResetMouseSpeedState();
+
+        if (selectedHandles.Count == 0)
+        {
+            TrayIcon.ShowMessage("ウィンドウが選択されていないためキャンセルしました", 1500);
+            return;
+        }
+
+        var captured = new System.Collections.Generic.List<WindowSetApp>();
+        foreach (IntPtr hWnd in selectedHandles)
+        {
+            var info = WindowSetManager.CaptureWindowInfo(hWnd);
+            if (info != null)
+                captured.Add(info);
+        }
+
+        if (captured.Count == 0)
+        {
+            TrayIcon.ShowMessage("アプリ情報を取得できませんでした", 1800);
+            return;
+        }
+
+        string keyName = AppConfig.KeysToWindowSetName(recallKey);
+        bool saved = AppConfig.SaveWindowSet(recallKey, captured);
+        if (saved)
+        {
+            string names = string.Join(", ", captured.Select(a => a.DisplayName));
+            TrayIcon.ShowMessage($"Window Set [{keyName}] を登録しました ({captured.Count} 件: {names})", 2200);
+        }
+        else
+        {
+            TrayIcon.ShowMessage($"Window Set [{keyName}] の保存に失敗しました", 2000);
+        }
+    }
+
+    private static void ExecuteWindowSet(Keys recallKey)
+    {
+        if (_windowSetPhase != WindowSetPhase.Menu) return;
+
+        _windowSetPhase = WindowSetPhase.None;
+        TrayIcon.CloseHelpPopup();
+        ResetMouseSpeedState();
+
+        string keyName = AppConfig.KeysToWindowSetName(recallKey);
+        if (!AppConfig.WindowSets.TryGetValue(recallKey, out var apps) || apps.Count == 0)
+        {
+            TrayIcon.ShowMessage($"Window Set [{keyName}] は未登録です", 1500);
+            return;
+        }
+
+        WindowSetManager.LaunchAndRestoreAsync(recallKey, apps, ShowNotificationOnUiThread);
+    }
+
+    private static void ShowNotificationOnUiThread(string text, int durationMs)
+    {
+        var ctx = _uiContext;
+        if (ctx != null)
+            ctx.Post(_ => TrayIcon.ShowMessage(text, durationMs), null);
+        else
+            TrayIcon.ShowMessage(text, durationMs);
+    }
+
+    private static void CancelWindowSetMode(bool showCancelToast = false)
+    {
+        if (_windowSetPhase == WindowSetPhase.None) return;
+
+        bool wasRegistering = _windowSetPhase == WindowSetPhase.Registering;
+        _windowSetPhase = WindowSetPhase.None;
+        ClearWindowSetOverlays();
+        TrayIcon.CloseHelpPopup();
+        if (wasRegistering)
+            RestoreMoveCursor();
+        ResetMouseSpeedState();
+
+        if (showCancelToast)
+            TrayIcon.ShowMessage("Window Set 登録をキャンセルしました", 1200);
+    }
+
+    private static void ClearWindowSetOverlays()
+    {
+        foreach (var (_, ov) in _windowSetSelections)
+            CloseSingleOverlay(ov);
+        _windowSetSelections.Clear();
+    }
+
+    private static void CloseSingleOverlay(OverlayForm ov)
+    {
+        try { ov.Hide(); } catch { }
+        if (!ov.IsDisposed && ov.IsHandleCreated)
+            ov.BeginInvoke(() => ov.Close());
+        else if (!ov.IsDisposed)
+            ov.Close();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2661,7 +3014,7 @@ class OverlayForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    public OverlayForm(int left = 0, int top = 0, int width = 1, int height = 1)
+    public OverlayForm(int left = 0, int top = 0, int width = 1, int height = 1, System.Drawing.Color? fillColor = null)
     {
         FormBorderStyle = FormBorderStyle.None;
         TopMost = true;
@@ -2669,7 +3022,7 @@ class OverlayForm : Form
         StartPosition = FormStartPosition.Manual;
         Location = new System.Drawing.Point(left, top);
         Size = new System.Drawing.Size(width, height);
-        BackColor = System.Drawing.Color.FromArgb(0, 120, 255);
+        BackColor = fillColor ?? System.Drawing.Color.FromArgb(0, 120, 255);
 
         // クリックを透過させる（マウスフックで処理するため）
         SetStyle(ControlStyles.Selectable, false);

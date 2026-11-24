@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -40,9 +42,15 @@ sealed class TrayIcon : IDisposable
         Close,
         Snap,
         Swap,
+        WindowSet,
     }
 
-    private readonly record struct HelpItem(string Text, HelpCommand? Command = null, bool IsMouseSpeedRow = false);
+    private readonly record struct HelpItem(
+        string Text,
+        HelpCommand? Command = null,
+        bool IsMouseSpeedRow = false,
+        Action? OnClick = null,
+        Color? TextColor = null);
 
     private readonly NotifyIcon _notifyIcon;
     private readonly Icon _icon;
@@ -131,6 +139,75 @@ sealed class TrayIcon : IDisposable
         };
         popup.Show();
         popup.BringToTopMost();
+    }
+
+    /// <summary>
+    /// Window Set の呼び出しキーと登録アプリ名一覧をポップアップ表示する。
+    /// </summary>
+    internal static void ShowWindowSetPopup(
+        IReadOnlyDictionary<Keys, List<WindowSetApp>> windowSets,
+        Keys triggerKey,
+        Action onRegister,
+        Action<Keys> onLaunch,
+        Action? onClosed = null)
+    {
+        CloseHelpPopup();
+
+        string triggerName = AppConfig.KeysToWindowSetName(triggerKey);
+        var items = new List<HelpItem>
+        {
+            new HelpItem("Window Set"),
+            new HelpItem(""),
+            new HelpItem($"    {triggerName}:  新規登録モードを開始",
+                OnClick: onRegister,
+                TextColor: Color.FromArgb(120, 190, 255)),
+            new HelpItem(""),
+        };
+
+        if (windowSets.Count == 0)
+        {
+            items.Add(new HelpItem("    (登録済みの Window Set はありません)",
+                TextColor: Color.FromArgb(160, 160, 160)));
+        }
+        else
+        {
+            var ordered = windowSets
+                .OrderBy(kv => AppConfig.KeysToWindowSetName(kv.Key), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (key, apps) in ordered)
+            {
+                string keyName = AppConfig.KeysToWindowSetName(key);
+                string appNames = string.Join(", ", apps.Select(a => a.DisplayName));
+                Keys capturedKey = key;
+                items.Add(new HelpItem($"    {keyName}:  {appNames}",
+                    OnClick: () => onLaunch(capturedKey)));
+            }
+        }
+
+        items.Add(new HelpItem(""));
+        items.Add(new HelpItem("呼び出しキーを押して起動 / Esc: キャンセル",
+            TextColor: Color.FromArgb(160, 160, 160)));
+
+        var popup = new HelpPopupForm(items.ToArray(), autoClose: false);
+        _helpPopup = popup;
+        popup.FormClosed += (_, _) =>
+        {
+            if (_helpPopup == popup)
+                _helpPopup = null;
+            onClosed?.Invoke();
+        };
+        popup.Show();
+        popup.BringToTopMost();
+    }
+
+    /// <summary>
+    /// 表示中のポップアップを最前面へ持ち上げる。
+    /// </summary>
+    internal static void BringHelpPopupToTopMost()
+    {
+        var popup = _helpPopup;
+        if (popup != null && !popup.IsDisposed && popup.Visible)
+            popup.BringToTopMost();
     }
 
     /// <summary>
@@ -245,10 +322,11 @@ sealed class TrayIcon : IDisposable
         string close = AppConfig.CloseKey.ToString();
         string snap = AppConfig.SnapKey.ToString();
         string swap = AppConfig.SwapKey.ToString();
+        string windowSet = AppConfig.WindowSetKey.ToString();
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2409"),
+            new HelpItem("cs_mouse_ctrl v2611.2413"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
@@ -263,6 +341,7 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
             new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
             new HelpItem($"    {swap}:  ウィンドウ位置入れ替え", HelpCommand.Swap),
+            new HelpItem($"    {windowSet}:  Window Set（一覧 / 登録 / 起動）", HelpCommand.WindowSet),
             new HelpItem("    , / . :  マウス移動速度", IsMouseSpeedRow: true),
             new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
             new HelpItem($"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
@@ -417,13 +496,17 @@ sealed class TrayIcon : IDisposable
                 {
                     Text = item.Text,
                     AutoSize = true,
-                    ForeColor = Color.White,
+                    ForeColor = item.TextColor ?? Color.White,
                     BackColor = Color.Transparent,
                     Font = _normalFont,
                     Location = new Point(Padding.Left, y),
                 };
 
-                if (item.Command is HelpCommand cmd && onCommand != null)
+                Action? clickAction = item.Command is HelpCommand cmd && onCommand != null
+                    ? () => onCommand(cmd)
+                    : item.OnClick;
+
+                if (clickAction != null)
                 {
                     label.Cursor = Cursors.Hand;
                     label.MouseEnter += (_, _) =>
@@ -436,7 +519,7 @@ sealed class TrayIcon : IDisposable
                         if (!IsDisposed && !label.IsDisposed && !_fontsDisposed)
                             label.Font = _normalFont;
                     };
-                    label.Click += (_, _) => onCommand(cmd);
+                    label.Click += (_, _) => clickAction();
                 }
                 else if (!_clickThrough)
                 {

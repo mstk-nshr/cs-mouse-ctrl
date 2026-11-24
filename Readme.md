@@ -16,6 +16,7 @@
 | Hotkey -> S | snap active window to grid position |
 | Hotkey -> E | extend an edge of active window (arrow key selects the edge) |
 | Hotkey -> W | swap position and size of two windows |
+| Hotkey -> G | Window Set (show list / register multiple apps / launch & restore layout) |
 | Hotkey -> . | increment mouse speed (1..20) |
 | Hotkey -> , | decrement mouse speed (1..20) |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
@@ -256,6 +257,29 @@ Hotkey -> W 押下
 - 2つ目のウィンドウ選択中も `Alt` / `Ctrl` + マウス移動による速度変更が利用できます。
 
 
+### Window Set（複数アプリ一括起動・配置復元）動作フロー
+
+```
+Hotkey -> G 押下
+  ↓ 登録済みの呼び出しキーとアプリ名一覧をポップアップ表示
+[登録モード（Hotkey -> G -> G）]
+  もう一度 G キーを押下（または一覧の「新規登録モードを開始」をクリック）
+  ↓ 複数の対象ウィンドウを順に左クリック（選択したウィンドウは半透明のアクセント色で塗りつぶし、再クリックで解除）
+  ↓ G / Esc 以外のキー（呼び出しキー）を押下
+  ↓ 各ウィンドウのアプリパス・working-dir・位置・サイズを config.toml に保存して終了
+[起動・復元（Hotkey -> G -> 呼び出しキー）]
+  登録済みの呼び出しキーを押下（または一覧の該当行をクリック）
+  ↓ 紐付けられた複数アプリを新規起動し、記録したウィンドウ位置とサイズを復元
+[キャンセル]
+  一覧表示中: Esc、一覧外クリック
+  登録モード中: Esc、右クリック
+```
+
+- 登録キーは `[hotkey] window_set_key`（既定 `"G"`）で変更できます（最前面固定の `"T"` と競合しないよう既定値を `"G"` としています）。
+- 登録された Window Set は `config.toml` に `[[window_set.<呼び出しキー>]]` 形式で自動追記され、アプリを再起動せずにそのまま呼び出せます。
+- 登録モード中も `Alt` / `Ctrl` + マウス移動による速度変更が利用できます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -317,11 +341,24 @@ edge_key = "E"
 # 例: "W"
 swap_key = "W"
 
+# Window Set 機能を呼び出すトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "G", "L"
+window_set_key = "G"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
 # ウィンドウ間の余白（px）
 inner_spacing = 10
+
+# Window Set 登録データ（登録モードから自動追記されます）
+# [[window_set.1]]
+# app_path = "C:\\Windows\\System32\\notepad.exe"
+# working_dir = "C:\\Users\\user"
+# x = 100
+# y = 100
+# width = 800
+# height = 600
 ```
 
 ### 設定項目一覧
@@ -342,6 +379,7 @@ inner_spacing = 10
 | `[hotkey]` | `snap_key` | 文字列 | `"S"` | ウィンドウスナップ選択 UI を起動するキー |
 | `[hotkey]` | `edge_key` | 文字列 | `"E"` | 辺拡張モードを起動するキー |
 | `[hotkey]` | `swap_key` | 文字列 | `"W"` | 2つのウィンドウの位置とサイズを入れ替えるキー |
+| `[hotkey]` | `window_set_key` | 文字列 | `"G"` | Window Set 機能（一覧表示 / 登録 / 起動）を呼び出すキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 

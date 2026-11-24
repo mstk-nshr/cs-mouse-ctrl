@@ -2,7 +2,32 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
+
+/// <summary>
+/// Window Set に登録される 1 アプリ分の起動・配置情報。
+/// </summary>
+sealed class WindowSetApp
+{
+    public string AppPath { get; set; } = "";
+    public string WorkingDir { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+
+    /// <summary>一覧表示用のアプリ名（拡張子なしの実行ファイル名）。</summary>
+    public string DisplayName
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(AppPath)) return "(unknown)";
+            string name = Path.GetFileNameWithoutExtension(AppPath);
+            return string.IsNullOrWhiteSpace(name) ? AppPath : name;
+        }
+    }
+}
 
 /// <summary>
 /// %LOCALAPPDATA%\cs-mouse-ctrl\config.toml を読み書きする設定クラス。
@@ -105,6 +130,19 @@ static class AppConfig
     public static Keys SwapKey { get; private set; } = Keys.W;
 
     /// <summary>
+    /// Window Set 機能を呼び出すトリガーキー（デフォルト G）。
+    /// config.toml の [hotkey] window_set_key に文字列で指定する。
+    /// </summary>
+    public static Keys WindowSetKey { get; private set; } = Keys.G;
+
+    /// <summary>
+    /// 登録済みの Window Set 一覧（呼び出しキー → アプリ情報リスト）。
+    /// config.toml の [[window_set.&lt;key&gt;]] から読み込まれる。
+    /// </summary>
+    private static readonly Dictionary<Keys, List<WindowSetApp>> _windowSets = new();
+    public static IReadOnlyDictionary<Keys, List<WindowSetApp>> WindowSets => _windowSets;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -190,6 +228,10 @@ static class AppConfig
         # 例: "W"
         swap_key = "{KeysToString(SwapKey)}"
 
+        # Window Set 機能を呼び出すトリガーキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "G", "L"
+        window_set_key = "{KeysToString(WindowSetKey)}"
+
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
         outer_spacing = [{OuterSpacing[0]}, {OuterSpacing[1]}, {OuterSpacing[2]}, {OuterSpacing[3]}]
@@ -220,6 +262,90 @@ static class AppConfig
         }
     }
 
+    /// <summary>
+    /// 指定した呼び出しキーに紐づく Window Set をメモリと config.toml に保存する。
+    /// 既存のコメントや他セクションは保持したまま、同一キーの [[window_set.&lt;key&gt;]] のみを置き換える。
+    /// </summary>
+    public static bool SaveWindowSet(Keys key, IReadOnlyList<WindowSetApp> apps)
+    {
+        if (apps.Count == 0) return false;
+
+        var copy = apps.Select(a => new WindowSetApp
+        {
+            AppPath = a.AppPath,
+            WorkingDir = a.WorkingDir,
+            X = a.X,
+            Y = a.Y,
+            Width = a.Width,
+            Height = a.Height,
+        }).ToList();
+
+        _windowSets[key] = copy;
+
+        try
+        {
+            if (!File.Exists(ConfigPath))
+                WriteDefault();
+
+            string existing = File.Exists(ConfigPath) ? File.ReadAllText(ConfigPath) : DefaultToml;
+            string lineEnding = existing.Contains("\r\n") ? "\r\n" : "\n";
+            string[] lines = existing.Replace("\r\n", "\n").Split('\n');
+
+            var kept = new List<string>(lines.Length);
+            bool skippingTarget = false;
+
+            foreach (string rawLine in lines)
+            {
+                string trimmed = rawLine.Trim();
+                if (TryParseWindowSetHeader(trimmed, out Keys headerKey))
+                {
+                    skippingTarget = (headerKey == key);
+                    if (skippingTarget)
+                    {
+                        // 直前の余分な空行を 1 行だけ整理
+                        while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
+                            kept.RemoveAt(kept.Count - 1);
+                        continue;
+                    }
+                }
+                else if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+                {
+                    skippingTarget = false;
+                }
+
+                if (!skippingTarget)
+                    kept.Add(rawLine);
+            }
+
+            // 末尾の余分な空行をトリム
+            while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
+                kept.RemoveAt(kept.Count - 1);
+
+            string keyName = KeysToWindowSetName(key);
+            foreach (var app in copy)
+            {
+                if (kept.Count > 0)
+                    kept.Add("");
+                kept.Add($"[[window_set.{keyName}]]");
+                kept.Add($"app_path = \"{EscapeTomlString(app.AppPath)}\"");
+                kept.Add($"working_dir = \"{EscapeTomlString(app.WorkingDir)}\"");
+                kept.Add($"x = {app.X}");
+                kept.Add($"y = {app.Y}");
+                kept.Add($"width = {app.Width}");
+                kept.Add($"height = {app.Height}");
+            }
+
+            Directory.CreateDirectory(ConfigDir);
+            File.WriteAllText(ConfigPath, string.Join(lineEnding, kept) + lineEnding);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AppConfig] Window Set 保存失敗: {ex.Message}");
+            return false;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // 内部実装: デフォルト生成
     // -----------------------------------------------------------------------
@@ -245,7 +371,9 @@ static class AppConfig
 
     private static void Parse(string toml)
     {
+        _windowSets.Clear();
         string currentSection = "";
+        WindowSetApp? currentWindowSetApp = null;
 
         foreach (string rawLine in toml.Split('\n'))
         {
@@ -255,9 +383,24 @@ static class AppConfig
             if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
+            // Window Set 配列テーブル: [[window_set.<key>]]
+            if (TryParseWindowSetHeader(line, out Keys setKey))
+            {
+                currentSection = "";
+                if (!_windowSets.TryGetValue(setKey, out var list))
+                {
+                    list = new List<WindowSetApp>();
+                    _windowSets[setKey] = list;
+                }
+                currentWindowSetApp = new WindowSetApp();
+                list.Add(currentWindowSetApp);
+                continue;
+            }
+
             // セクション
             if (line.StartsWith('[') && line.EndsWith(']'))
             {
+                currentWindowSetApp = null;
                 currentSection = line[1..^1].Trim();
                 continue;
             }
@@ -269,7 +412,46 @@ static class AppConfig
             string key   = line[..eq].Trim();
             string value = StripComment(line[(eq + 1)..]).Trim();
 
+            if (currentWindowSetApp != null)
+            {
+                ApplyWindowSetValue(currentWindowSetApp, key, value);
+                continue;
+            }
+
             ApplyValue(currentSection, key, value);
+        }
+
+        // app_path が空の不完全なエントリを除外し、空リストのキーも整理
+        foreach (Keys k in _windowSets.Keys.ToList())
+        {
+            _windowSets[k].RemoveAll(a => string.IsNullOrWhiteSpace(a.AppPath));
+            if (_windowSets[k].Count == 0)
+                _windowSets.Remove(k);
+        }
+    }
+
+    private static void ApplyWindowSetValue(WindowSetApp app, string key, string value)
+    {
+        switch (key)
+        {
+            case "app_path":
+                app.AppPath = UnescapeTomlString(value);
+                break;
+            case "working_dir":
+                app.WorkingDir = UnescapeTomlString(value);
+                break;
+            case "x":
+                if (int.TryParse(value, out int x)) app.X = x;
+                break;
+            case "y":
+                if (int.TryParse(value, out int y)) app.Y = y;
+                break;
+            case "width":
+                if (int.TryParse(value, out int w)) app.Width = w;
+                break;
+            case "height":
+                if (int.TryParse(value, out int h)) app.Height = h;
+                break;
         }
     }
 
@@ -363,6 +545,12 @@ static class AppConfig
                     if (TryParseKeys(name, out Keys k))
                         SwapKey = k;
                 }
+                if (key == "window_set_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        WindowSetKey = k;
+                }
                 break;
 
             case "window_fit":
@@ -387,11 +575,26 @@ static class AppConfig
     /// <summary>行末コメント（# 以降）を除去する。文字列リテラル内の # は除去しない。</summary>
     private static string StripComment(string s)
     {
-        bool inStr = false;
+        bool inDouble = false;
+        bool inSingle = false;
         for (int i = 0; i < s.Length; i++)
         {
-            if (s[i] == '"') inStr = !inStr;
-            if (!inStr && s[i] == '#') return s[..i];
+            char c = s[i];
+            if (inDouble)
+            {
+                if (c == '\\' && i + 1 < s.Length) { i++; continue; }
+                if (c == '"') inDouble = false;
+            }
+            else if (inSingle)
+            {
+                if (c == '\'') inSingle = false;
+            }
+            else
+            {
+                if (c == '"') inDouble = true;
+                else if (c == '\'') inSingle = true;
+                else if (c == '#') return s[..i];
+            }
         }
         return s;
     }
@@ -400,9 +603,97 @@ static class AppConfig
     private static string UnquoteString(string s)
     {
         s = s.Trim();
-        if (s.Length >= 2 && s[0] == '"' && s[^1] == '"')
+        if (s.Length >= 2 && ((s[0] == '"' && s[^1] == '"') || (s[0] == '\'' && s[^1] == '\'')))
             return s[1..^1];
         return s;
+    }
+
+    /// <summary>TOML 基本文字列（"..."）用にエスケープする。</summary>
+    private static string EscapeTomlString(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Replace("\\", "\\\\")
+                .Replace("\"", "\\\"")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t");
+    }
+
+    /// <summary>TOML 文字列リテラル（基本文字列 "..." / リテラル文字列 '...'）をアンエスケープする。</summary>
+    private static string UnescapeTomlString(string s)
+    {
+        s = s.Trim();
+        if (s.Length >= 2 && s[0] == '\'' && s[^1] == '\'')
+            return s[1..^1];
+
+        if (s.Length >= 2 && s[0] == '"' && s[^1] == '"')
+        {
+            string inner = s[1..^1];
+            var sb = new StringBuilder(inner.Length);
+            for (int i = 0; i < inner.Length; i++)
+            {
+                if (inner[i] == '\\' && i + 1 < inner.Length)
+                {
+                    char next = inner[i + 1];
+                    switch (next)
+                    {
+                        case '\\': sb.Append('\\'); i++; break;
+                        case '"':  sb.Append('"');  i++; break;
+                        case 'n':  sb.Append('\n'); i++; break;
+                        case 'r':  sb.Append('\r'); i++; break;
+                        case 't':  sb.Append('\t'); i++; break;
+                        default:
+                            // 手動編集で未エスケープの Windows パス (\W 等) が書かれた場合はそのまま保持
+                            sb.Append('\\');
+                            break;
+                    }
+                }
+                else
+                {
+                    sb.Append(inner[i]);
+                }
+            }
+            return sb.ToString();
+        }
+
+        return s;
+    }
+
+    /// <summary>[[window_set.&lt;key&gt;]] ヘッダを解析する。</summary>
+    private static bool TryParseWindowSetHeader(string trimmedLine, out Keys key)
+    {
+        key = Keys.None;
+        string cleaned = StripComment(trimmedLine).Trim();
+        if (!cleaned.StartsWith("[[") || !cleaned.EndsWith("]]"))
+            return false;
+
+        string inner = cleaned[2..^2].Trim();
+        const string prefix = "window_set.";
+        if (!inner.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        string keyPart = UnquoteString(inner[prefix.Length..].Trim());
+        return TryParseWindowSetKey(keyPart, out key);
+    }
+
+    /// <summary>Window Set 呼び出しキー名を Keys へ変換する（"0".."9" → D0..D9 対応）。</summary>
+    public static bool TryParseWindowSetKey(string name, out Keys key)
+    {
+        name = name.Trim();
+        if (name.Length == 1 && name[0] >= '0' && name[0] <= '9')
+        {
+            key = Keys.D0 + (name[0] - '0');
+            return true;
+        }
+        return TryParseKeys(name, out key);
+    }
+
+    /// <summary>Window Set の呼び出しキーを表示・config.toml 用の短いキー名へ変換する（D0..D9 → "0".."9"）。</summary>
+    public static string KeysToWindowSetName(Keys k)
+    {
+        if (k >= Keys.D0 && k <= Keys.D9)
+            return ((char)('0' + (k - Keys.D0))).ToString();
+        return KeysToConfigName(k);
     }
 
     /// <summary>速度倍率の文字列（"2", "0.5" 等）を double へパースする（> 0）。</summary>
