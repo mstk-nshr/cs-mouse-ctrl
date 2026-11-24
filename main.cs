@@ -51,6 +51,15 @@ class Program
     static extern IntPtr GetDesktopWindow();
 
     [DllImport("user32.dll")]
+    static extern IntPtr GetShellWindow();
+
+    [DllImport("user32.dll")]
+    static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
     static extern IntPtr FindWindow(string lpClassName, string? lpWindowName);
 
     [DllImport("user32.dll")]
@@ -383,6 +392,13 @@ class Program
     private static WindowSnapForm? _snapForm;
     private static IntPtr _snapTarget = IntPtr.Zero;
 
+    // Window Swap Mode (2つのウィンドウの位置とサイズを入れ替え) -------------
+
+    private static readonly uint _currentProcessId = (uint)Environment.ProcessId;
+    private static bool _isSwapMode;
+    private static IntPtr _swapFirstTarget = IntPtr.Zero;
+    private static OverlayForm? _swapOverlay;
+
     // Edge Extend Mode (辺拡張) ---------------------------------------------
 
     [DllImport("user32.dll")]
@@ -559,6 +575,7 @@ class Program
                 UnhookWindowsHookEx(_mouseHookID);
             _overlay?.Close();
             CancelMoveMode();
+            CancelSwapMode();
             CloseDimOverlay();
             EndEdgeMode();
             CloseSnapForm();
@@ -796,10 +813,29 @@ class Program
                 }
             }
 
+            // ウィンドウ位置入れ替えモード中のキー処理
+            if (_isSwapMode)
+            {
+                Keys k = (Keys)vkCode;
+                if (!IsModifierKey(k))
+                {
+                    if (isKeyDown)
+                    {
+                        CancelSwapMode();
+                        _suppressNextKeyUp = k;
+                        return (IntPtr)1;
+                    }
+                    else if (isKeyUp)
+                    {
+                        return (IntPtr)1;
+                    }
+                }
+            }
+
             // Pause / Break キーの処理（NumPad待ちのトグル・キャンセル）
             if (IsPauseOrBreakKey((Keys)vkCode))
             {
-                if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode)
+                if (isKeyDown && _resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode && !_isSwapMode)
                 {
                     long now = Stopwatch.GetTimestamp();
                     if (_lastPauseTick == 0 || Stopwatch.GetElapsedTime(_lastPauseTick, now).TotalMilliseconds >= 150)
@@ -1008,6 +1044,16 @@ class Program
                     _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
+
+                // pause_key → swap_key シーケンス: NumPad 待ち中に swap_key が押されたらウィンドウ位置入れ替えモードへ
+                if (isKeyDown && (Keys)vkCode == AppConfig.SwapKey)
+                {
+                    IntPtr target = activeWindow;
+                    CancelNumpadWaiting();
+                    TryStartSwapMode(target);
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
             }
         }
 
@@ -1020,8 +1066,8 @@ class Program
 
     private static void TryStartMoveMode(IntPtr preferredTarget = default)
     {
-        // 既に移動モードまたはリサイズモード中なら無視
-        if (_isMoveMode || _resizePhase != ResizePhase.None) return;
+        // 既に移動モード・リサイズモード・入れ替えモード中なら無視
+        if (_isMoveMode || _resizePhase != ResizePhase.None || _isSwapMode) return;
 
         IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
 
@@ -1329,20 +1375,198 @@ class Program
     private static bool IsSystemWindow(IntPtr hWnd)
     {
         if (hWnd == IntPtr.Zero) return true;
-        if (hWnd == GetDesktopWindow()) return true;
+        if (hWnd == GetDesktopWindow() || hWnd == GetShellWindow()) return true;
         // タスクバー
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         if (hWnd == taskbar) return true;
-        // タスクバーの子ウィンドウも除外
+        // サブモニタのタスクバー
         IntPtr secondTaskbar = FindWindow("Shell_SecondaryTrayWnd", null);
         if (hWnd == secondTaskbar) return true;
+        // デスクトップ背景（Progman / WorkerW）およびシェル系ウィンドウ
+        var sb = new System.Text.StringBuilder(256);
+        if (GetClassName(hWnd, sb, sb.Capacity) > 0)
+        {
+            string cls = sb.ToString();
+            if (cls.Equals("Progman", StringComparison.OrdinalIgnoreCase)
+                || cls.Equals("WorkerW", StringComparison.OrdinalIgnoreCase)
+                || cls.Equals("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase)
+                || cls.Equals("Shell_SecondaryTrayWnd", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
         return false;
+    }
+
+    private static bool IsOwnProcessWindow(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(hWnd, out uint pid);
+        return pid == _currentProcessId;
+    }
+
+    private static bool IsModifierKey(Keys k) =>
+        k is Keys.LControlKey or Keys.RControlKey or Keys.ControlKey
+            or Keys.LMenu or Keys.RMenu or Keys.Menu
+            or Keys.LShiftKey or Keys.RShiftKey or Keys.ShiftKey
+            or Keys.LWin or Keys.RWin;
+
+    // -----------------------------------------------------------------------
+    // Window Swap Mode
+    // -----------------------------------------------------------------------
+
+    private static void TryStartSwapMode(IntPtr target)
+    {
+        if (_isSwapMode || _isMoveMode || _resizePhase != ResizePhase.None || _isEdgeMode) return;
+        if (target == IntPtr.Zero) return;
+
+        IntPtr rootWnd = GetAncestor(target, GA_ROOT);
+        if (rootWnd == IntPtr.Zero) rootWnd = target;
+
+        // デスクトップ背景・タスクバー・自プロセスウィンドウは対象外
+        if (IsSystemWindow(rootWnd) || IsOwnProcessWindow(rootWnd)) return;
+
+        // 最大化・最小化状態のウィンドウは操作対象外
+        if (IsZoomed(rootWnd))
+        {
+            TrayIcon.ShowMessage("最大化ウィンドウは入れ替え対象外です", 1500);
+            return;
+        }
+        if (IsIconic(rootWnd)) return;
+
+        if (!GetWindowRect(rootWnd, out RECT rect)) return;
+        if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return;
+
+        _swapFirstTarget = rootWnd;
+        _isSwapMode = true;
+
+        // 1つ目のウィンドウを半透明のアクセント色で強調表示
+        CloseSwapOverlay();
+        _swapOverlay = new OverlayForm();
+        _swapOverlay.UpdateRect(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        _swapOverlay.Show();
+        _swapOverlay.BringToTopMost();
+
+        // 入れ替え先選択ポップアップを表示し、マウスポインタを人差し指形状へ変更
+        TrayIcon.ShowMessage("入れ替えるWindowをクリックしてください", durationMs: 0, clickThrough: true);
+        ApplySwapCursor();
+    }
+
+    /// <summary>入れ替え先ウィンドウ選択中のカーソルを人差し指（ハンド）形状にする。</summary>
+    private static void ApplySwapCursor()
+    {
+        IntPtr shared = LoadCursor(IntPtr.Zero, (int)OCR_HAND);
+        if (shared == IntPtr.Zero) return;
+        var copies = new IntPtr[_cursorTypes.Length];
+        for (int i = 0; i < copies.Length; i++) copies[i] = CopyIcon(shared);
+        for (int i = 0; i < copies.Length; i++)
+            if (copies[i] != IntPtr.Zero) SetSystemCursor(copies[i], _cursorTypes[i]);
+        _moveCursorApplied = true;
+    }
+
+    private static void CloseSwapOverlay()
+    {
+        if (_swapOverlay != null)
+        {
+            var ov = _swapOverlay;
+            _swapOverlay = null;
+            try { ov.Hide(); } catch { }
+            if (!ov.IsDisposed && ov.IsHandleCreated)
+                ov.BeginInvoke(() => ov.Close());
+            else
+                ov.Close();
+        }
+    }
+
+    private static void CompleteSwapMode(POINT pt)
+    {
+        if (!_isSwapMode) return;
+
+        IntPtr firstTarget = _swapFirstTarget;
+        _isSwapMode = false;
+        _swapFirstTarget = IntPtr.Zero;
+
+        // 自アプリのオーバーレイ・案内ポップアップが WindowFromPoint にヒットしないよう先に閉じ、カーソルを復元
+        CloseSwapOverlay();
+        TrayIcon.CloseHelpPopup();
+        RestoreMoveCursor();
+        ResetMouseSpeedState();
+
+        IntPtr clicked = WindowFromPoint(pt);
+        if (clicked != IntPtr.Zero && IsSystemWindow(clicked))
+        {
+            TrayIcon.ShowMessage("対象外のウィンドウのためキャンセルしました", 1500);
+            return;
+        }
+
+        IntPtr secondTarget = clicked == IntPtr.Zero ? IntPtr.Zero : GetAncestor(clicked, GA_ROOT);
+        if (secondTarget == IntPtr.Zero) secondTarget = clicked;
+
+        // デスクトップ背景・タスクバー・自プロセスウィンドウは対象外
+        if (secondTarget == IntPtr.Zero || IsSystemWindow(secondTarget) || IsOwnProcessWindow(secondTarget))
+        {
+            TrayIcon.ShowMessage("対象外のウィンドウのためキャンセルしました", 1500);
+            return;
+        }
+
+        // 最大化・最小化状態のウィンドウは操作対象外
+        if (IsZoomed(secondTarget))
+        {
+            TrayIcon.ShowMessage("最大化ウィンドウは入れ替え対象外です", 1500);
+            return;
+        }
+        if (IsIconic(secondTarget)) return;
+
+        // 同じウィンドウが選択された場合は何もしない
+        if (secondTarget == firstTarget) return;
+
+        // 1つ目のウィンドウが依然有効かつ最大化・最小化されていないことを再確認
+        if (firstTarget == IntPtr.Zero || !IsWindow(firstTarget)
+            || IsSystemWindow(firstTarget) || IsZoomed(firstTarget) || IsIconic(firstTarget))
+        {
+            return;
+        }
+
+        if (!GetWindowRect(firstTarget, out RECT rect1) || !GetWindowRect(secondTarget, out RECT rect2))
+            return;
+
+        int w1 = rect1.Right - rect1.Left;
+        int h1 = rect1.Bottom - rect1.Top;
+        int w2 = rect2.Right - rect2.Left;
+        int h2 = rect2.Bottom - rect2.Top;
+        if (w1 <= 0 || h1 <= 0 || w2 <= 0 || h2 <= 0) return;
+
+        bool crossMonitor = !string.Equals(
+            Screen.FromHandle(firstTarget).DeviceName,
+            Screen.FromHandle(secondTarget).DeviceName,
+            StringComparison.OrdinalIgnoreCase);
+
+        MoveWindow(firstTarget, rect2.Left, rect2.Top, w2, h2, true);
+        MoveWindow(secondTarget, rect1.Left, rect1.Top, w1, h1, true);
+
+        // DPI の異なるモニタ間移動時のスケーリング補正を再適用
+        if (crossMonitor)
+        {
+            MoveWindow(firstTarget, rect2.Left, rect2.Top, w2, h2, true);
+            MoveWindow(secondTarget, rect1.Left, rect1.Top, w1, h1, true);
+        }
+    }
+
+    private static void CancelSwapMode()
+    {
+        if (!_isSwapMode) return;
+        _isSwapMode = false;
+        _swapFirstTarget = IntPtr.Zero;
+        CloseSwapOverlay();
+        TrayIcon.CloseHelpPopup();
+        RestoreMoveCursor();
+        ResetMouseSpeedState();
     }
 
     private static void TryStartResizeMode(IntPtr preferredTarget = default)
     {
-        // 既にリサイズモード中または移動モード中なら無視
-        if (_resizePhase != ResizePhase.None || _isMoveMode) return;
+        // 既にリサイズモード中・移動モード中・入れ替えモード中なら無視
+        if (_resizePhase != ResizePhase.None || _isMoveMode || _isSwapMode) return;
 
         IntPtr target = preferredTarget != IntPtr.Zero ? preferredTarget : activeWindow;
 
@@ -1606,6 +1830,24 @@ class Program
                     EndEdgeMode(); // ホイール等
                     return (IntPtr)1;
                 }
+            }
+            else if (_isSwapMode)
+            {
+                if (msg == WM_LBUTTONDOWN)
+                {
+                    _suppressNextLButtonUp = true;
+                    CompleteSwapMode(ms.pt);
+                    return (IntPtr)1;
+                }
+                if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP || msg == WM_MBUTTONUP)
+                {
+                    return (IntPtr)1;
+                }
+                if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
+
+                CancelSwapMode();
+                return (IntPtr)1;
             }
             else if (_isWaitingForNumpad)
             {
@@ -1948,17 +2190,24 @@ class Program
         if (GetCursorPos(out POINT cursorPosition))
         {
             IntPtr window = WindowFromPoint(cursorPosition);
-            activeWindow = window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, GA_ROOT);
-            if (activeWindow == IntPtr.Zero)
+            if (window != IntPtr.Zero && IsSystemWindow(window))
             {
-                IntPtr fg = GetForegroundWindow();
-                if (fg != IntPtr.Zero)
-                    activeWindow = GetAncestor(fg, GA_ROOT);
-            }
-
-            // デスクトップ・タスクバーは対象外
-            if (IsSystemWindow(activeWindow))
                 activeWindow = IntPtr.Zero;
+            }
+            else
+            {
+                activeWindow = window == IntPtr.Zero ? IntPtr.Zero : GetAncestor(window, GA_ROOT);
+                if (activeWindow == IntPtr.Zero)
+                {
+                    IntPtr fg = GetForegroundWindow();
+                    if (fg != IntPtr.Zero)
+                        activeWindow = GetAncestor(fg, GA_ROOT);
+                }
+
+                // デスクトップ・タスクバーは対象外
+                if (IsSystemWindow(activeWindow))
+                    activeWindow = IntPtr.Zero;
+            }
 
             // デスクトップ全体を黒半透明で覆い、対象ウィンドウをその上に表示
             ShowDimOverlay(activeWindow);
@@ -2205,6 +2454,15 @@ class Program
                 else
                 {
                     EndWaitingOrClosePopup();
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Swap:
+                {
+                    IntPtr swapTarget = _isWaitingForNumpad ? activeWindow : target;
+                    EndWaitingOrClosePopup();
+                    if (swapTarget != IntPtr.Zero)
+                        TryStartSwapMode(swapTarget);
                 }
                 break;
         }

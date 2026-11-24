@@ -15,6 +15,7 @@
 | Hotkey -> X | close active window |
 | Hotkey -> S | snap active window to grid position |
 | Hotkey -> E | extend an edge of active window (arrow key selects the edge) |
+| Hotkey -> W | swap position and size of two windows |
 | Hotkey -> . | increment mouse speed (1..20) |
 | Hotkey -> , | decrement mouse speed (1..20) |
 | Alt + Mouse Move | move mouse pointer at 2× speed |
@@ -233,6 +234,28 @@ Pause -> E 押下
 - キーリピートは無視されるため、矢印キーを押しっぱなしにしても拡張は実行されません。
 
 
+### Window Swap（位置・サイズ入れ替え）動作フロー
+
+```
+Hotkey -> W 押下
+  ↓ 1つ目の対象ウィンドウ取得（Pause 押下時のカーソル直下のウィンドウ）
+  ↓ デスクトップ背景・タスクバー・最大化ウィンドウ除外チェック
+  ↓ 1つ目のウィンドウを半透明のアクセント色で塗りつぶし
+  ↓ 「入れ替えるWindowをクリックしてください」を表示（カーソルを人差し指形状へ変更）
+[2つ目のウィンドウ選択]
+  入れ替え先のウィンドウを左クリック
+  ↓ デスクトップ背景・タスクバー・最大化ウィンドウ除外チェック
+  ↓ 2つのウィンドウの位置とサイズを入れ替え
+[キャンセル]
+  右クリック・中クリック・ホイール、または修飾キー以外のキー入力（Esc 等） → キャンセル
+```
+
+- 2つのウィンドウの位置とサイズ（幅・高さ）を相互に入れ替えます。
+- 選択待ち中は、1つ目のウィンドウが半透明のアクセント色で強調表示され、マウスポインタが人差し指形状になります。
+- デスクトップ背景ウィンドウ、タスクバー、および最大化状態のウィンドウは操作対象外です（1つ目・2つ目のいずれであっても入れ替えは実行されません）。
+- 2つ目のウィンドウ選択中も `Alt` / `Ctrl` + マウス移動による速度変更が利用できます。
+
+
 ## 設定ファイル
 
 `%LOCALAPPDATA%\cs-mouse-ctrl\config.toml` で動作をカスタマイズできます。
@@ -290,6 +313,10 @@ close_key = "X"
 # 例: "E"
 edge_key = "E"
 
+# 2つのウィンドウの位置とサイズを入れ替えるトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "W"
+swap_key = "W"
+
 [window_fit]
 # デスクトップ端との余白（上, 右, 下, 左 の順、px）
 outer_spacing = [10, 10, 10, 10]
@@ -314,6 +341,7 @@ inner_spacing = 10
 | `[hotkey]` | `close_key` | 文字列 | `"X"` | 対象ウィンドウを閉じるキー |
 | `[hotkey]` | `snap_key` | 文字列 | `"S"` | ウィンドウスナップ選択 UI を起動するキー |
 | `[hotkey]` | `edge_key` | 文字列 | `"E"` | 辺拡張モードを起動するキー |
+| `[hotkey]` | `swap_key` | 文字列 | `"W"` | 2つのウィンドウの位置とサイズを入れ替えるキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
 

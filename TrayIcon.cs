@@ -23,6 +23,7 @@ sealed class TrayIcon : IDisposable
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
 
+    private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
 
@@ -38,6 +39,7 @@ sealed class TrayIcon : IDisposable
         Maximize,
         Close,
         Snap,
+        Swap,
     }
 
     private readonly record struct HelpItem(string Text, HelpCommand? Command = null, bool IsMouseSpeedRow = false);
@@ -166,11 +168,17 @@ sealed class TrayIcon : IDisposable
 
     /// <summary>
     /// 任意のメッセージをカーソル周辺にポップアップ表示する。
+    /// durationMs が 0 以下の場合は明示的に閉じるまで表示し続ける。
     /// </summary>
-    internal static void ShowMessage(string text, int durationMs = 1500)
+    internal static void ShowMessage(string text, int durationMs = 1500, bool clickThrough = false)
     {
         CloseHelpPopup();
-        var popup = new HelpPopupForm(text, autoClose: true, durationMs: durationMs);
+        bool autoClose = durationMs > 0;
+        var popup = new HelpPopupForm(
+            text,
+            autoClose: autoClose,
+            durationMs: autoClose ? durationMs : 1500,
+            clickThrough: clickThrough);
         _helpPopup = popup;
         popup.FormClosed += (_, _) =>
         {
@@ -236,10 +244,11 @@ sealed class TrayIcon : IDisposable
         string maximize = AppConfig.MaximizeKey.ToString();
         string close = AppConfig.CloseKey.ToString();
         string snap = AppConfig.SnapKey.ToString();
+        string swap = AppConfig.SwapKey.ToString();
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2317"),
+            new HelpItem("cs_mouse_ctrl v2611.2409"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
@@ -253,6 +262,7 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {maximize}:  最大化", HelpCommand.Maximize),
             new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
             new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
+            new HelpItem($"    {swap}:  ウィンドウ位置入れ替え", HelpCommand.Swap),
             new HelpItem("    , / . :  マウス移動速度", IsMouseSpeedRow: true),
             new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
             new HelpItem($"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
@@ -343,10 +353,13 @@ sealed class TrayIcon : IDisposable
         private const int WM_LBUTTONUP = 0x0202;
         private const int WM_MOUSEACTIVATE = 0x0021;
         private const int MA_NOACTIVATE = 3;
+        private const int WM_NCHITTEST = 0x0084;
+        private const int HTTRANSPARENT = -1;
 
         private readonly System.Windows.Forms.Timer? _closeTimer;
         private readonly Font _normalFont;
         private readonly Font _underlineFont;
+        private readonly bool _clickThrough;
         private bool _fontsDisposed;
 
         private StepButtonControl? _minusBtn;
@@ -355,8 +368,8 @@ sealed class TrayIcon : IDisposable
 
         protected override bool ShowWithoutActivation => true;
 
-        public HelpPopupForm(string text, bool autoClose = true, int durationMs = 5000)
-            : this(new[] { new HelpItem(text) }, autoClose, durationMs, null)
+        public HelpPopupForm(string text, bool autoClose = true, int durationMs = 5000, bool clickThrough = false)
+            : this(new[] { new HelpItem(text) }, autoClose, durationMs, null, null, null, clickThrough)
         {
         }
 
@@ -366,8 +379,10 @@ sealed class TrayIcon : IDisposable
             int durationMs = 5000,
             Action<HelpCommand>? onCommand = null,
             Func<int>? getMouseSpeed = null,
-            Func<int, int>? setMouseSpeed = null)
+            Func<int, int>? setMouseSpeed = null,
+            bool clickThrough = false)
         {
+            _clickThrough = clickThrough;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
             ShowInTaskbar = false;
@@ -423,7 +438,7 @@ sealed class TrayIcon : IDisposable
                     };
                     label.Click += (_, _) => onCommand(cmd);
                 }
-                else
+                else if (!_clickThrough)
                 {
                     label.Click += (_, _) => Close();
                 }
@@ -442,7 +457,8 @@ sealed class TrayIcon : IDisposable
             UpdatePosition();
 
             // クリックで閉じる
-            Click += (_, _) => Close();
+            if (!_clickThrough)
+                Click += (_, _) => Close();
 
             if (autoClose)
             {
@@ -921,12 +937,19 @@ sealed class TrayIcon : IDisposable
             {
                 var cp = base.CreateParams;
                 cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+                if (_clickThrough)
+                    cp.ExStyle |= WS_EX_TRANSPARENT;
                 return cp;
             }
         }
 
         protected override void WndProc(ref Message m)
         {
+            if (_clickThrough && m.Msg == WM_NCHITTEST)
+            {
+                m.Result = (IntPtr)HTTRANSPARENT;
+                return;
+            }
             if (m.Msg == WM_MOUSEACTIVATE)
             {
                 m.Result = (IntPtr)MA_NOACTIVATE;

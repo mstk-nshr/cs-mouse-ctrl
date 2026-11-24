@@ -99,6 +99,12 @@ static class AppConfig
     public static Keys EdgeKey { get; private set; } = Keys.E;
 
     /// <summary>
+    /// 2つのウィンドウの位置とサイズを入れ替えるモードを起動するトリガーキー（デフォルト W）。
+    /// config.toml の [hotkey] swap_key に文字列で指定する。
+    /// </summary>
+    public static Keys SwapKey { get; private set; } = Keys.W;
+
+    /// <summary>
     /// デスクトップ端との余白（上, 右, 下, 左 の順、px）。
     /// config.toml の [window_fit] outer_spacing に配列で指定する。
     /// </summary>
@@ -179,6 +185,10 @@ static class AppConfig
         # 辺拡張モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "E"
         edge_key = "{KeysToString(EdgeKey)}"
+
+        # 2つのウィンドウの位置とサイズを入れ替えるトリガーキー名（Windows Forms の Keys 列挙体の名前）
+        # 例: "W"
+        swap_key = "{KeysToString(SwapKey)}"
 
         [window_fit]
         # デスクトップ端との余白（上, 右, 下, 左 の順、px）
@@ -346,6 +356,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         SnapKey = k;
+                }
+                if (key == "swap_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        SwapKey = k;
                 }
                 break;
 
