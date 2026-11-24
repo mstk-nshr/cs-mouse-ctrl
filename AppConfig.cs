@@ -12,6 +12,7 @@ sealed class WindowSetApp
 {
     public string AppPath { get; set; } = "";
     public string WorkingDir { get; set; } = "";
+    public List<string> Params { get; set; } = new();
     public int X { get; set; }
     public int Y { get; set; }
     public int Width { get; set; }
@@ -274,6 +275,7 @@ static class AppConfig
         {
             AppPath = a.AppPath,
             WorkingDir = a.WorkingDir,
+            Params = new List<string>(a.Params),
             X = a.X,
             Y = a.Y,
             Width = a.Width,
@@ -329,6 +331,7 @@ static class AppConfig
                 kept.Add($"[[window_set.{keyName}]]");
                 kept.Add($"app_path = \"{EscapeTomlString(app.AppPath)}\"");
                 kept.Add($"working_dir = \"{EscapeTomlString(app.WorkingDir)}\"");
+                kept.Add($"Params = {FormatTomlStringArray(app.Params)}");
                 kept.Add($"x = {app.X}");
                 kept.Add($"y = {app.Y}");
                 kept.Add($"width = {app.Width}");
@@ -432,13 +435,17 @@ static class AppConfig
 
     private static void ApplyWindowSetValue(WindowSetApp app, string key, string value)
     {
-        switch (key)
+        switch (key.ToLowerInvariant())
         {
             case "app_path":
                 app.AppPath = UnescapeTomlString(value);
                 break;
             case "working_dir":
                 app.WorkingDir = UnescapeTomlString(value);
+                break;
+            case "params":
+                if (TryParseStringArray(value, out List<string> parsedParams))
+                    app.Params = parsedParams;
                 break;
             case "x":
                 if (int.TryParse(value, out int x)) app.X = x;
@@ -606,6 +613,83 @@ static class AppConfig
         if (s.Length >= 2 && ((s[0] == '"' && s[^1] == '"') || (s[0] == '\'' && s[^1] == '\'')))
             return s[1..^1];
         return s;
+    }
+
+    /// <summary>文字列リストを TOML インライン配列（例: [ "param1", "param2" ] / []）へ整形する。</summary>
+    private static string FormatTomlStringArray(IReadOnlyList<string> items)
+    {
+        if (items.Count == 0) return "[]";
+        return "[ " + string.Join(", ", items.Select(s => $"\"{EscapeTomlString(s)}\"")) + " ]";
+    }
+
+    /// <summary>TOML 文字列配列（例: [ "param1", "param2" ] / []）をパースする。</summary>
+    private static bool TryParseStringArray(string s, out List<string> result)
+    {
+        result = new List<string>();
+        s = s.Trim();
+        if (s.Length < 2 || s[0] != '[' || s[^1] != ']')
+            return false;
+
+        int i = 1;
+        int end = s.Length - 1;
+
+        while (i < end)
+        {
+            while (i < end && char.IsWhiteSpace(s[i])) i++;
+            if (i >= end) break;
+
+            if (s[i] == '"')
+            {
+                int start = i;
+                i++;
+                bool closed = false;
+                while (i < end)
+                {
+                    if (s[i] == '\\' && i + 1 < end)
+                    {
+                        i += 2;
+                        continue;
+                    }
+                    if (s[i] == '"')
+                    {
+                        i++;
+                        closed = true;
+                        break;
+                    }
+                    i++;
+                }
+                if (!closed) return false;
+                result.Add(UnescapeTomlString(s[start..i]));
+            }
+            else if (s[i] == '\'')
+            {
+                int start = i;
+                i++;
+                int closeIdx = s.IndexOf('\'', i);
+                if (closeIdx < 0 || closeIdx >= end) return false;
+                i = closeIdx + 1;
+                result.Add(UnescapeTomlString(s[start..i]));
+            }
+            else
+            {
+                // クォートなし要素にも寛容に対応
+                int comma = s.IndexOf(',', i);
+                int tokenEnd = (comma < 0 || comma >= end) ? end : comma;
+                string token = s[i..tokenEnd].Trim();
+                if (token.Length > 0)
+                    result.Add(token);
+                i = tokenEnd;
+            }
+
+            while (i < end && char.IsWhiteSpace(s[i])) i++;
+            if (i < end)
+            {
+                if (s[i] == ',') i++;
+                else return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>TOML 基本文字列（"..."）用にエスケープする。</summary>

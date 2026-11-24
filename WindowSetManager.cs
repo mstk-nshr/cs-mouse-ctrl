@@ -85,6 +85,12 @@ static class WindowSetManager
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
 
+    [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern IntPtr CommandLineToArgvW(string lpCmdLine, out int pNumArgs);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
     [DllImport("ntdll.dll")]
     private static extern int NtQueryInformationProcess(
         IntPtr processHandle, int processInformationClass,
@@ -185,7 +191,8 @@ static class WindowSetManager
         if (string.IsNullOrWhiteSpace(appPath))
             return null;
 
-        string workingDir = TryGetProcessWorkingDirectory(pid)
+        TryGetProcessParameters(pid, out string? pebWorkDir, out List<string> args);
+        string workingDir = pebWorkDir
             ?? Path.GetDirectoryName(appPath)
             ?? "";
 
@@ -193,6 +200,7 @@ static class WindowSetManager
         {
             AppPath = appPath,
             WorkingDir = workingDir,
+            Params = args,
             X = rect.Left,
             Y = rect.Top,
             Width = width,
@@ -274,14 +282,18 @@ static class WindowSetManager
     }
 
     /// <summary>
-    /// リモートプロセスの PEB (RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath) を読み取り、
-    /// カレントディレクトリ（working-dir）を取得する。64bit / 32bit (WOW64) 両対応。
+    /// リモートプロセスの PEB (RTL_USER_PROCESS_PARAMETERS) を読み取り、
+    /// カレントディレクトリ（working-dir）とコマンドライン引数（argv[1..]）を取得する。
+    /// 64bit / 32bit (WOW64) 両対応。
     /// </summary>
-    private static string? TryGetProcessWorkingDirectory(uint pid)
+    private static void TryGetProcessParameters(uint pid, out string? workingDir, out List<string> args)
     {
+        workingDir = null;
+        args = new List<string>();
+
         IntPtr hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid);
         if (hProcess == IntPtr.Zero)
-            return null;
+            return;
 
         try
         {
@@ -289,23 +301,35 @@ static class WindowSetManager
             if (Environment.Is64BitProcess)
                 IsWow64Process(hProcess, out isWow64);
 
-            string? raw = isWow64
-                ? ReadCurrentDirectory32(hProcess)
-                : (Environment.Is64BitProcess ? ReadCurrentDirectory64(hProcess) : ReadCurrentDirectory32Native(hProcess));
+            string? rawDir;
+            string? rawCmdLine;
 
-            if (string.IsNullOrWhiteSpace(raw))
-                return null;
+            if (isWow64)
+                ReadProcessParameters32(hProcess, out rawDir, out rawCmdLine);
+            else if (Environment.Is64BitProcess)
+                ReadProcessParameters64(hProcess, out rawDir, out rawCmdLine);
+            else
+                ReadProcessParameters32Native(hProcess, out rawDir, out rawCmdLine);
 
-            string dir = raw.TrimEnd('\0').Trim();
-            // ルートディレクトリ（例: C:\）以外は末尾のバックスラッシュを除去
-            if (dir.Length > 3 && dir.EndsWith('\\'))
-                dir = dir.TrimEnd('\\');
+            if (!string.IsNullOrWhiteSpace(rawDir))
+            {
+                string dir = rawDir.TrimEnd('\0').Trim();
+                // ルートディレクトリ（例: C:\）以外は末尾のバックスラッシュを除去
+                if (dir.Length > 3 && dir.EndsWith('\\'))
+                    dir = dir.TrimEnd('\\');
 
-            return Directory.Exists(dir) ? dir : null;
+                if (Directory.Exists(dir))
+                    workingDir = dir;
+            }
+
+            if (!string.IsNullOrWhiteSpace(rawCmdLine))
+            {
+                args = SplitCommandLineArguments(rawCmdLine.TrimEnd('\0'));
+            }
         }
         catch
         {
-            return null;
+            // アクセス拒否・保護プロセス等はフォールバック
         }
         finally
         {
@@ -313,28 +337,38 @@ static class WindowSetManager
         }
     }
 
-    private static string? ReadCurrentDirectory64(IntPtr hProcess)
+    private static void ReadProcessParameters64(IntPtr hProcess, out string? currentDir, out string? commandLine)
     {
+        currentDir = null;
+        commandLine = null;
+
         var pbi = new PROCESS_BASIC_INFORMATION();
         int status = NtQueryInformationProcess(
             hProcess, ProcessBasicInformation, ref pbi,
             Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
         if (status != 0 || pbi.PebBaseAddress == IntPtr.Zero)
-            return null;
+            return;
 
         // PEB + 0x20 = ProcessParameters (8 bytes)
         byte[] ptrBuf = new byte[8];
         if (!ReadProcessMemory(hProcess, IntPtr.Add(pbi.PebBaseAddress, 0x20), ptrBuf, 8, out _))
-            return null;
+            return;
 
         IntPtr processParams = (IntPtr)BitConverter.ToInt64(ptrBuf, 0);
         if (processParams == IntPtr.Zero)
-            return null;
+            return;
 
         // RTL_USER_PROCESS_PARAMETERS + 0x38 = CurrentDirectory.DosPath (UNICODE_STRING: 16 bytes)
+        currentDir = ReadUnicodeString64(hProcess, IntPtr.Add(processParams, 0x38));
+        // RTL_USER_PROCESS_PARAMETERS + 0x70 = CommandLine (UNICODE_STRING: 16 bytes)
+        commandLine = ReadUnicodeString64(hProcess, IntPtr.Add(processParams, 0x70));
+    }
+
+    private static string? ReadUnicodeString64(IntPtr hProcess, IntPtr address)
+    {
         // [0..1] Length (ushort), [2..3] MaxLength (ushort), [4..7] pad, [8..15] Buffer (IntPtr)
         byte[] usBuf = new byte[16];
-        if (!ReadProcessMemory(hProcess, IntPtr.Add(processParams, 0x38), usBuf, 16, out _))
+        if (!ReadProcessMemory(hProcess, address, usBuf, 16, out _))
             return null;
 
         ushort length = BitConverter.ToUInt16(usBuf, 0);
@@ -342,44 +376,61 @@ static class WindowSetManager
         return ReadRemoteUnicodeString(hProcess, strPtr, length);
     }
 
-    private static string? ReadCurrentDirectory32(IntPtr hProcess)
+    private static void ReadProcessParameters32(IntPtr hProcess, out string? currentDir, out string? commandLine)
     {
+        currentDir = null;
+        commandLine = null;
+
         IntPtr peb32 = IntPtr.Zero;
         int status = NtQueryInformationProcessPtr(
             hProcess, ProcessWow64Information, ref peb32, IntPtr.Size, out _);
         if (status != 0 || peb32 == IntPtr.Zero)
-            return null;
+            return;
 
-        return ReadCurrentDirectoryFromPeb32(hProcess, peb32);
+        ReadProcessParametersFromPeb32(hProcess, peb32, out currentDir, out commandLine);
     }
 
-    private static string? ReadCurrentDirectory32Native(IntPtr hProcess)
+    private static void ReadProcessParameters32Native(IntPtr hProcess, out string? currentDir, out string? commandLine)
     {
+        currentDir = null;
+        commandLine = null;
+
         var pbi = new PROCESS_BASIC_INFORMATION();
         int status = NtQueryInformationProcess(
             hProcess, ProcessBasicInformation, ref pbi,
             Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
         if (status != 0 || pbi.PebBaseAddress == IntPtr.Zero)
-            return null;
+            return;
 
-        return ReadCurrentDirectoryFromPeb32(hProcess, pbi.PebBaseAddress);
+        ReadProcessParametersFromPeb32(hProcess, pbi.PebBaseAddress, out currentDir, out commandLine);
     }
 
-    private static string? ReadCurrentDirectoryFromPeb32(IntPtr hProcess, IntPtr peb32)
+    private static void ReadProcessParametersFromPeb32(
+        IntPtr hProcess, IntPtr peb32, out string? currentDir, out string? commandLine)
     {
+        currentDir = null;
+        commandLine = null;
+
         // PEB32 + 0x10 = ProcessParameters (4 bytes)
         byte[] ptrBuf = new byte[4];
         if (!ReadProcessMemory(hProcess, IntPtr.Add(peb32, 0x10), ptrBuf, 4, out _))
-            return null;
+            return;
 
         uint processParams = BitConverter.ToUInt32(ptrBuf, 0);
         if (processParams == 0)
-            return null;
+            return;
 
         // RTL_USER_PROCESS_PARAMETERS32 + 0x24 = CurrentDirectory.DosPath (UNICODE_STRING32: 8 bytes)
+        currentDir = ReadUnicodeString32(hProcess, new IntPtr(unchecked((long)processParams + 0x24)));
+        // RTL_USER_PROCESS_PARAMETERS32 + 0x40 = CommandLine (UNICODE_STRING32: 8 bytes)
+        commandLine = ReadUnicodeString32(hProcess, new IntPtr(unchecked((long)processParams + 0x40)));
+    }
+
+    private static string? ReadUnicodeString32(IntPtr hProcess, IntPtr address)
+    {
         // [0..1] Length (ushort), [2..3] MaxLength (ushort), [4..7] Buffer (uint)
         byte[] usBuf = new byte[8];
-        if (!ReadProcessMemory(hProcess, new IntPtr(unchecked((long)processParams + 0x24)), usBuf, 8, out _))
+        if (!ReadProcessMemory(hProcess, address, usBuf, 8, out _))
             return null;
 
         ushort length = BitConverter.ToUInt16(usBuf, 0);
@@ -389,7 +440,7 @@ static class WindowSetManager
 
     private static string? ReadRemoteUnicodeString(IntPtr hProcess, IntPtr strPtr, ushort byteLength)
     {
-        if (strPtr == IntPtr.Zero || byteLength == 0 || byteLength > 4096 || (byteLength % 2) != 0)
+        if (strPtr == IntPtr.Zero || byteLength == 0 || (byteLength % 2) != 0)
             return null;
 
         byte[] strBuf = new byte[byteLength];
@@ -397,6 +448,40 @@ static class WindowSetManager
             return null;
 
         return Encoding.Unicode.GetString(strBuf);
+    }
+
+    /// <summary>
+    /// Windows の CommandLineToArgvW でコマンドライン文字列を分解し、実行ファイル名 (argv[0]) を除いた引数一覧を返す。
+    /// </summary>
+    private static List<string> SplitCommandLineArguments(string commandLine)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(commandLine))
+            return result;
+
+        IntPtr argv = CommandLineToArgvW(commandLine, out int argc);
+        if (argv == IntPtr.Zero)
+            return result;
+
+        try
+        {
+            for (int i = 1; i < argc; i++)
+            {
+                IntPtr ptr = Marshal.ReadIntPtr(argv, i * IntPtr.Size);
+                if (ptr != IntPtr.Zero)
+                {
+                    string? arg = Marshal.PtrToStringUni(ptr);
+                    if (arg != null)
+                        result.Add(arg);
+                }
+            }
+        }
+        finally
+        {
+            LocalFree(argv);
+        }
+
+        return result;
     }
 
     // -----------------------------------------------------------------------
@@ -417,6 +502,7 @@ static class WindowSetManager
         {
             AppPath = a.AppPath,
             WorkingDir = a.WorkingDir,
+            Params = new List<string>(a.Params),
             X = a.X,
             Y = a.Y,
             Width = a.Width,
@@ -554,6 +640,9 @@ static class WindowSetManager
                 WorkingDirectory = workDir,
                 UseShellExecute = false,
             };
+            foreach (string param in app.Params)
+                psi.ArgumentList.Add(param);
+
             return (true, Process.Start(psi));
         }
         catch (Win32Exception)
@@ -565,6 +654,7 @@ static class WindowSetManager
                 {
                     FileName = app.AppPath,
                     WorkingDirectory = workDir,
+                    Arguments = BuildWindowsArguments(app.Params),
                     UseShellExecute = true,
                 };
                 return (true, Process.Start(psi));
@@ -580,6 +670,58 @@ static class WindowSetManager
             Debug.WriteLine($"[WindowSet] 起動失敗 ({app.AppPath}): {ex.Message}");
             return (false, null);
         }
+    }
+
+    /// <summary>引数リストを Windows の CommandLineToArgvW 互換の単一引数文字列へ整形する。</summary>
+    private static string BuildWindowsArguments(IReadOnlyList<string> args)
+    {
+        if (args.Count == 0) return "";
+        var sb = new StringBuilder();
+        for (int i = 0; i < args.Count; i++)
+        {
+            if (i > 0) sb.Append(' ');
+            string arg = args[i];
+            if (arg.Length == 0)
+            {
+                sb.Append("\"\"");
+                continue;
+            }
+            bool needsQuote = arg.Any(c => char.IsWhiteSpace(c) || c == '"');
+            if (!needsQuote)
+            {
+                sb.Append(arg);
+                continue;
+            }
+
+            sb.Append('"');
+            int backslashes = 0;
+            foreach (char c in arg)
+            {
+                if (c == '\\')
+                {
+                    backslashes++;
+                }
+                else if (c == '"')
+                {
+                    sb.Append('\\', backslashes * 2 + 1);
+                    sb.Append('"');
+                    backslashes = 0;
+                }
+                else
+                {
+                    if (backslashes > 0)
+                    {
+                        sb.Append('\\', backslashes);
+                        backslashes = 0;
+                    }
+                    sb.Append(c);
+                }
+            }
+            if (backslashes > 0)
+                sb.Append('\\', backslashes * 2);
+            sb.Append('"');
+        }
+        return sb.ToString();
     }
 
     private static IntPtr TryClaimNewWindow(

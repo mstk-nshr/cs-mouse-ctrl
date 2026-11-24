@@ -266,7 +266,7 @@ Hotkey -> G 押下
   もう一度 G キーを押下（または一覧の「新規登録モードを開始」をクリック）
   ↓ 複数の対象ウィンドウを順に左クリック（選択したウィンドウは半透明のアクセント色で塗りつぶし、再クリックで解除）
   ↓ G / Esc 以外のキー（呼び出しキー）を押下
-  ↓ 各ウィンドウのアプリパス・working-dir・位置・サイズを config.toml に保存して終了
+  ↓ 各ウィンドウのアプリパス・working-dir・コマンドライン引数（Params）・位置・サイズを config.toml に保存して終了
 [起動・復元（Hotkey -> G -> 呼び出しキー）]
   登録済みの呼び出しキーを押下（または一覧の該当行をクリック）
   ↓ 紐付けられた複数アプリを新規起動し、記録したウィンドウ位置とサイズを復元
@@ -355,6 +355,7 @@ inner_spacing = 10
 # [[window_set.1]]
 # app_path = "C:\\Windows\\System32\\notepad.exe"
 # working_dir = "C:\\Users\\user"
+# Params = [ "param1", "param2" ]
 # x = 100
 # y = 100
 # width = 800
