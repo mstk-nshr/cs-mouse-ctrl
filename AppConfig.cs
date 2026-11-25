@@ -290,38 +290,7 @@ static class AppConfig
                 WriteDefault();
 
             string existing = File.Exists(ConfigPath) ? File.ReadAllText(ConfigPath) : DefaultToml;
-            string lineEnding = existing.Contains("\r\n") ? "\r\n" : "\n";
-            string[] lines = existing.Replace("\r\n", "\n").Split('\n');
-
-            var kept = new List<string>(lines.Length);
-            bool skippingTarget = false;
-
-            foreach (string rawLine in lines)
-            {
-                string trimmed = rawLine.Trim();
-                if (TryParseWindowSetHeader(trimmed, out Keys headerKey))
-                {
-                    skippingTarget = (headerKey == key);
-                    if (skippingTarget)
-                    {
-                        // 直前の余分な空行を 1 行だけ整理
-                        while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
-                            kept.RemoveAt(kept.Count - 1);
-                        continue;
-                    }
-                }
-                else if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
-                {
-                    skippingTarget = false;
-                }
-
-                if (!skippingTarget)
-                    kept.Add(rawLine);
-            }
-
-            // 末尾の余分な空行をトリム
-            while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
-                kept.RemoveAt(kept.Count - 1);
+            List<string> kept = RemoveWindowSetLines(existing, key, out string lineEnding);
 
             string keyName = KeysToWindowSetName(key);
             foreach (var app in copy)
@@ -347,6 +316,84 @@ static class AppConfig
             System.Diagnostics.Debug.WriteLine($"[AppConfig] Window Set 保存失敗: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// 指定した呼び出しキーに紐づく Window Set をメモリと config.toml から削除する。
+    /// 既存のコメントや他セクション・他キーのエントリは保持する。
+    /// </summary>
+    public static bool DeleteWindowSet(Keys key)
+    {
+        if (!_windowSets.Remove(key))
+            return false;
+
+        try
+        {
+            if (!File.Exists(ConfigPath))
+                return true;
+
+            string existing = File.ReadAllText(ConfigPath);
+            List<string> kept = RemoveWindowSetLines(existing, key, out string lineEnding);
+
+            Directory.CreateDirectory(ConfigDir);
+            string content = kept.Count > 0 ? string.Join(lineEnding, kept) + lineEnding : "";
+            File.WriteAllText(ConfigPath, content);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AppConfig] Window Set 削除失敗: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// TOML テキストから指定キーに対応する [[window_set.&lt;key&gt;]] ブロックをすべて取り除く。
+    /// </summary>
+    private static List<string> RemoveWindowSetLines(string existing, Keys key, out string lineEnding)
+    {
+        lineEnding = existing.Contains("\r\n") ? "\r\n" : "\n";
+        string[] lines = existing.Replace("\r\n", "\n").Split('\n');
+
+        var kept = new List<string>(lines.Length);
+        bool skippingTarget = false;
+
+        foreach (string rawLine in lines)
+        {
+            string trimmed = rawLine.Trim();
+            if (TryParseWindowSetHeader(trimmed, out Keys headerKey))
+            {
+                bool isTarget = (headerKey == key);
+                if (isTarget)
+                {
+                    skippingTarget = true;
+                    while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
+                        kept.RemoveAt(kept.Count - 1);
+                    continue;
+                }
+                else
+                {
+                    if (skippingTarget && kept.Count > 0 && !string.IsNullOrWhiteSpace(kept[^1]))
+                        kept.Add("");
+                    skippingTarget = false;
+                }
+            }
+            else if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                if (skippingTarget && kept.Count > 0 && !string.IsNullOrWhiteSpace(kept[^1]))
+                    kept.Add("");
+                skippingTarget = false;
+            }
+
+            if (!skippingTarget)
+                kept.Add(rawLine);
+        }
+
+        // 末尾の余分な空行をトリム
+        while (kept.Count > 0 && string.IsNullOrWhiteSpace(kept[^1]))
+            kept.RemoveAt(kept.Count - 1);
+
+        return kept;
     }
 
     // -----------------------------------------------------------------------

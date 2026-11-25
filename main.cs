@@ -403,7 +403,7 @@ class Program
 
     // Window Set Mode (複数アプリの登録・一括起動＆配置復元) -----------------
 
-    private enum WindowSetPhase { None, Menu, Registering }
+    private enum WindowSetPhase { None, Menu, Registering, Deleting }
     private static WindowSetPhase _windowSetPhase = WindowSetPhase.None;
     private static bool _windowSetTriggerReleased = true;
     private static readonly System.Collections.Generic.List<(IntPtr HWnd, OverlayForm Overlay)> _windowSetSelections = new();
@@ -852,7 +852,7 @@ class Program
                 }
             }
 
-            // Window Set モード中のキー処理（一覧待ち / 登録モード）
+            // Window Set モード中のキー処理（一覧待ち / 登録モード / 削除モード）
             if (_windowSetPhase != WindowSetPhase.None)
             {
                 Keys k = (Keys)vkCode;
@@ -872,9 +872,24 @@ class Program
                                 if (!_windowSetTriggerReleased) return (IntPtr)1;
                                 StartWindowSetRegisterMode(fromKeyboard: true);
                             }
+                            else if (k == Keys.Delete || k == Keys.Back)
+                            {
+                                StartWindowSetDeleteMode();
+                            }
                             else
                             {
                                 ExecuteWindowSet(k);
+                            }
+                        }
+                        else if (_windowSetPhase == WindowSetPhase.Deleting)
+                        {
+                            if (k == Keys.Escape || IsPauseOrBreakKey(k))
+                            {
+                                CancelWindowSetMode();
+                            }
+                            else
+                            {
+                                DeleteWindowSet(k);
                             }
                         }
                         else if (_windowSetPhase == WindowSetPhase.Registering)
@@ -883,12 +898,12 @@ class Program
                             {
                                 CancelWindowSetMode(showCancelToast: true);
                             }
-                            else if (k == AppConfig.WindowSetKey)
+                            else if (k == AppConfig.WindowSetKey || k == Keys.Delete || k == Keys.Back)
                             {
-                                if (!_windowSetTriggerReleased) return (IntPtr)1;
+                                if (k == AppConfig.WindowSetKey && !_windowSetTriggerReleased) return (IntPtr)1;
                                 string trigName = AppConfig.KeysToWindowSetName(AppConfig.WindowSetKey);
                                 UpdateWindowSetRegisterStatus(
-                                    hintOverride: $"'{trigName}' 以外のキーを押して登録してください");
+                                    hintOverride: $"'{trigName}' / Del / BackSpace 以外のキーを押して登録してください");
                             }
                             else
                             {
@@ -1950,7 +1965,7 @@ class Program
                     return (IntPtr)1;
                 }
             }
-            else if (_windowSetPhase == WindowSetPhase.Menu)
+            else if (_windowSetPhase == WindowSetPhase.Menu || _windowSetPhase == WindowSetPhase.Deleting)
             {
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
@@ -2763,12 +2778,61 @@ class Program
             AppConfig.WindowSets,
             AppConfig.WindowSetKey,
             onRegister: () => StartWindowSetRegisterMode(fromKeyboard: false),
+            onDeleteMode: StartWindowSetDeleteMode,
             onLaunch: ExecuteWindowSet,
+            onDeleteKey: DeleteWindowSet,
             onClosed: () =>
             {
                 if (_windowSetPhase == WindowSetPhase.Menu)
                     CancelWindowSetMode();
             });
+    }
+
+    private static void StartWindowSetDeleteMode()
+    {
+        if (_windowSetPhase == WindowSetPhase.Deleting) return;
+
+        if (AppConfig.WindowSets.Count == 0)
+        {
+            _windowSetPhase = WindowSetPhase.None;
+            TrayIcon.CloseHelpPopup();
+            ResetMouseSpeedState();
+            TrayIcon.ShowMessage("削除できる Window Set はありません", 1500);
+            return;
+        }
+
+        _windowSetPhase = WindowSetPhase.Deleting;
+        TrayIcon.ShowWindowSetDeletePopup(
+            AppConfig.WindowSets,
+            onDeleteKey: DeleteWindowSet,
+            onClosed: () =>
+            {
+                if (_windowSetPhase == WindowSetPhase.Deleting)
+                    CancelWindowSetMode();
+            });
+    }
+
+    private static void DeleteWindowSet(Keys recallKey)
+    {
+        if (_windowSetPhase != WindowSetPhase.Menu && _windowSetPhase != WindowSetPhase.Deleting)
+            return;
+
+        _windowSetPhase = WindowSetPhase.None;
+        TrayIcon.CloseHelpPopup();
+        ResetMouseSpeedState();
+
+        string keyName = AppConfig.KeysToWindowSetName(recallKey);
+        if (!AppConfig.WindowSets.ContainsKey(recallKey))
+        {
+            TrayIcon.ShowMessage($"Window Set [{keyName}] は未登録です", 1500);
+            return;
+        }
+
+        bool deleted = AppConfig.DeleteWindowSet(recallKey);
+        if (deleted)
+            TrayIcon.ShowMessage($"Window Set [{keyName}] を削除しました", 1800);
+        else
+            TrayIcon.ShowMessage($"Window Set [{keyName}] の削除に失敗しました", 2000);
     }
 
     private static void StartWindowSetRegisterMode(bool fromKeyboard = false)

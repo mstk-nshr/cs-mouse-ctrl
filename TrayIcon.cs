@@ -50,7 +50,10 @@ sealed class TrayIcon : IDisposable
         HelpCommand? Command = null,
         bool IsMouseSpeedRow = false,
         Action? OnClick = null,
-        Color? TextColor = null);
+        Color? TextColor = null,
+        string? RightActionText = null,
+        Action? RightActionClick = null,
+        Color? RightActionColor = null);
 
     private readonly NotifyIcon _notifyIcon;
     private readonly Icon _icon;
@@ -148,7 +151,9 @@ sealed class TrayIcon : IDisposable
         IReadOnlyDictionary<Keys, List<WindowSetApp>> windowSets,
         Keys triggerKey,
         Action onRegister,
+        Action onDeleteMode,
         Action<Keys> onLaunch,
+        Action<Keys> onDeleteKey,
         Action? onClosed = null)
     {
         CloseHelpPopup();
@@ -161,8 +166,16 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {triggerName}:  新規登録モードを開始",
                 OnClick: onRegister,
                 TextColor: Color.FromArgb(120, 190, 255)),
-            new HelpItem(""),
         };
+
+        if (windowSets.Count > 0)
+        {
+            items.Add(new HelpItem("    Del:  削除モードを開始",
+                OnClick: onDeleteMode,
+                TextColor: Color.FromArgb(255, 130, 130)));
+        }
+
+        items.Add(new HelpItem(""));
 
         if (windowSets.Count == 0)
         {
@@ -179,13 +192,65 @@ sealed class TrayIcon : IDisposable
                 string keyName = AppConfig.KeysToWindowSetName(key);
                 string appNames = string.Join(", ", apps.Select(a => a.DisplayName));
                 Keys capturedKey = key;
-                items.Add(new HelpItem($"    {keyName}:  {appNames}",
-                    OnClick: () => onLaunch(capturedKey)));
+                items.Add(new HelpItem(
+                    $"    {keyName}:  {appNames}",
+                    OnClick: () => onLaunch(capturedKey),
+                    RightActionText: "[×]",
+                    RightActionClick: () => onDeleteKey(capturedKey),
+                    RightActionColor: Color.FromArgb(235, 110, 110)));
             }
         }
 
         items.Add(new HelpItem(""));
-        items.Add(new HelpItem("呼び出しキーを押して起動 / Esc: キャンセル",
+        string footer = windowSets.Count > 0
+            ? "呼び出しキーで起動 / Del: 削除 / Esc: キャンセル"
+            : "呼び出しキーを押して起動 / Esc: キャンセル";
+        items.Add(new HelpItem(footer, TextColor: Color.FromArgb(160, 160, 160)));
+
+        var popup = new HelpPopupForm(items.ToArray(), autoClose: false);
+        _helpPopup = popup;
+        popup.FormClosed += (_, _) =>
+        {
+            if (_helpPopup == popup)
+                _helpPopup = null;
+            onClosed?.Invoke();
+        };
+        popup.Show();
+        popup.BringToTopMost();
+    }
+
+    /// <summary>
+    /// Window Set 削除モードの選択一覧ポップアップを表示する。
+    /// </summary>
+    internal static void ShowWindowSetDeletePopup(
+        IReadOnlyDictionary<Keys, List<WindowSetApp>> windowSets,
+        Action<Keys> onDeleteKey,
+        Action? onClosed = null)
+    {
+        CloseHelpPopup();
+
+        var items = new List<HelpItem>
+        {
+            new HelpItem("Window Set - 削除モード", TextColor: Color.FromArgb(255, 120, 120)),
+            new HelpItem(""),
+        };
+
+        var ordered = windowSets
+            .OrderBy(kv => AppConfig.KeysToWindowSetName(kv.Key), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, apps) in ordered)
+        {
+            string keyName = AppConfig.KeysToWindowSetName(key);
+            string appNames = string.Join(", ", apps.Select(a => a.DisplayName));
+            Keys capturedKey = key;
+            items.Add(new HelpItem(
+                $"    {keyName}:  {appNames}",
+                OnClick: () => onDeleteKey(capturedKey),
+                TextColor: Color.FromArgb(255, 190, 190)));
+        }
+
+        items.Add(new HelpItem(""));
+        items.Add(new HelpItem("削除する呼び出しキーを押下（またはクリック） / Esc: キャンセル",
             TextColor: Color.FromArgb(160, 160, 160)));
 
         var popup = new HelpPopupForm(items.ToArray(), autoClose: false);
@@ -326,7 +391,7 @@ sealed class TrayIcon : IDisposable
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2417"),
+            new HelpItem("cs_mouse_ctrl v2611.2509"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
@@ -341,7 +406,7 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
             new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
             new HelpItem($"    {swap}:  ウィンドウ位置入れ替え", HelpCommand.Swap),
-            new HelpItem($"    {windowSet}:  Window Set（一覧 / 登録 / 起動）", HelpCommand.WindowSet),
+            new HelpItem($"    {windowSet}:  Window Set（一覧 / 登録 / 起動 / 削除）", HelpCommand.WindowSet),
             new HelpItem("    , / . :  マウス移動速度", IsMouseSpeedRow: true),
             new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
             new HelpItem($"Ctrl + マウス移動:  {AppConfig.CtrlMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
@@ -475,6 +540,7 @@ sealed class TrayIcon : IDisposable
             int y = Padding.Top;
             int maxWidth = 0;
             int emptyLineHeight = TextRenderer.MeasureText(" ", _normalFont).Height;
+            var rightLabels = new List<Label>();
 
             foreach (var item in items)
             {
@@ -527,8 +593,53 @@ sealed class TrayIcon : IDisposable
                 }
 
                 Controls.Add(label);
-                maxWidth = Math.Max(maxWidth, label.PreferredWidth);
+                int rowW = label.PreferredWidth;
+
+                if (!string.IsNullOrEmpty(item.RightActionText) && item.RightActionClick is Action rightAction)
+                {
+                    Color normalRightColor = item.RightActionColor ?? Color.FromArgb(235, 110, 110);
+                    var rightLabel = new Label
+                    {
+                        Text = item.RightActionText,
+                        AutoSize = true,
+                        ForeColor = normalRightColor,
+                        BackColor = Color.Transparent,
+                        Font = _normalFont,
+                        Cursor = Cursors.Hand,
+                        Location = new Point(Padding.Left + label.PreferredWidth + 16, y),
+                    };
+                    rightLabel.MouseEnter += (_, _) =>
+                    {
+                        if (!IsDisposed && !rightLabel.IsDisposed && !_fontsDisposed)
+                        {
+                            rightLabel.Font = _underlineFont;
+                            rightLabel.ForeColor = Color.FromArgb(255, 85, 85);
+                        }
+                    };
+                    rightLabel.MouseLeave += (_, _) =>
+                    {
+                        if (!IsDisposed && !rightLabel.IsDisposed && !_fontsDisposed)
+                        {
+                            rightLabel.Font = _normalFont;
+                            rightLabel.ForeColor = normalRightColor;
+                        }
+                    };
+                    rightLabel.Click += (_, _) => rightAction();
+                    Controls.Add(rightLabel);
+                    rightLabels.Add(rightLabel);
+                    rowW = label.PreferredWidth + 16 + rightLabel.PreferredWidth;
+                }
+
+                maxWidth = Math.Max(maxWidth, rowW);
                 y += label.PreferredHeight;
+            }
+
+            // 右端アクションラベルをポップアップ右端に揃える
+            foreach (var rightLabel in rightLabels)
+            {
+                rightLabel.Location = new Point(
+                    Padding.Left + maxWidth - rightLabel.PreferredWidth,
+                    rightLabel.Location.Y);
             }
 
             // 内容に合わせてウィンドウサイズを決定（行の欠けを防ぐ）
