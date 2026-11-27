@@ -602,6 +602,7 @@ class Program
             CancelMoveMode();
             CancelSwapMode();
             CancelStackMode();
+            CloseAllStackTabForms();
             CancelWindowSetMode();
             CloseDimOverlay();
             EndEdgeMode();
@@ -1721,6 +1722,7 @@ class Program
     private static readonly List<IntPtr> _stackTargets = new();
     private static OverlayForm? _stackBaseOverlay;
     private static readonly List<OverlayForm> _stackOverlays = new();
+    private static readonly List<WindowStackTabForm> _stackTabForms = new();
 
     private static void TryStartStackMode(IntPtr target)
     {
@@ -1812,23 +1814,72 @@ class Program
         EndStackMode();
 
         if (baseWnd == IntPtr.Zero || !IsWindow(baseWnd) || !GetWindowRect(baseWnd, out RECT rect)) return;
+
+        var validTargets = new List<IntPtr>();
+        foreach (var t in targets)
+        {
+            if (t != baseWnd && IsWindow(t) && !IsIconic(t))
+                validTargets.Add(t);
+        }
+        if (validTargets.Count == 0)
+        {
+            SetForegroundWindow(baseWnd);
+            return;
+        }
+
+        // 基準ウィンドウが既に既存スタック直下に配置されていた場合は、そのタブ領域を含めた元の範囲を基準にする
+        var allStackWindows = new List<IntPtr> { baseWnd };
+        allStackWindows.AddRange(validTargets);
+        foreach (var existing in _stackTabForms.ToArray())
+        {
+            if (existing.IsDisposed) continue;
+            if (existing.ContainsWindow(baseWnd)
+                && existing.Left == rect.Left
+                && existing.Width == (rect.Right - rect.Left)
+                && existing.Bottom == rect.Top)
+            {
+                rect.Top = existing.Top;
+            }
+            existing.RemoveWindows(allStackWindows);
+        }
+
         int w = rect.Right - rect.Left;
         int h = rect.Bottom - rect.Top;
         if (w <= 0 || h <= 0) return;
 
-        foreach (var t in targets)
+        int tabH = WindowStackTabForm.TabBarHeight;
+        int winTop = rect.Top + tabH;
+        int winH = Math.Max(100, h - tabH);
+
+        // 基準ウィンドウもタブ高さ分だけ下にずらして高さを調整
+        if (IsZoomed(baseWnd)) ShowWindow(baseWnd, SW_RESTORE);
+        MoveWindow(baseWnd, rect.Left, winTop, w, winH, true);
+
+        foreach (var t in validTargets)
         {
-            if (!IsWindow(t) || IsIconic(t)) continue;
             if (IsZoomed(t)) ShowWindow(t, SW_RESTORE);
             bool cross = !string.Equals(
                 Screen.FromHandle(t).DeviceName, Screen.FromHandle(baseWnd).DeviceName,
                 StringComparison.OrdinalIgnoreCase);
-            MoveWindow(t, rect.Left, rect.Top, w, h, true);
-            if (cross) MoveWindow(t, rect.Left, rect.Top, w, h, true);
+            MoveWindow(t, rect.Left, winTop, w, winH, true);
+            if (cross) MoveWindow(t, rect.Left, winTop, w, winH, true);
         }
 
         // 基準ウィンドウを最前面（アクティブ）にする
         SetForegroundWindow(baseWnd);
+
+        // タブ切り替えウィンドウをスタック領域の上辺（最上位）に表示
+        var tabForm = new WindowStackTabForm(allStackWindows, rect.Left, rect.Top, w, baseWnd);
+        tabForm.FormClosed += (_, _) => _stackTabForms.Remove(tabForm);
+        _stackTabForms.Add(tabForm);
+        tabForm.Show();
+    }
+
+    private static void CloseAllStackTabForms()
+    {
+        foreach (var form in _stackTabForms.ToArray())
+            form.CloseSafe();
+        _stackTabForms.Clear();
     }
 
     private static void EndStackMode()
