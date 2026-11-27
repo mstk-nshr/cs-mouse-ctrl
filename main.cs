@@ -601,6 +601,7 @@ class Program
             _overlay?.Close();
             CancelMoveMode();
             CancelSwapMode();
+            CancelStackMode();
             CancelWindowSetMode();
             CloseDimOverlay();
             EndEdgeMode();
@@ -851,6 +852,26 @@ class Program
                 {
                     if (EdgeAlias((Keys)vkCode) == _edgeKey) _edgeKeyReleased = true;
                     return (IntPtr)1;
+                }
+            }
+
+            // Window Stack モード中のキー処理（Enter で確定、それ以外は中断）
+            if (_isStackMode)
+            {
+                Keys k = (Keys)vkCode;
+                if (!IsModifierKey(k))
+                {
+                    if (isKeyDown)
+                    {
+                        if (k == Keys.Enter) CompleteStackMode();
+                        else CancelStackMode();
+                        _suppressNextKeyUp = k;
+                        return (IntPtr)1;
+                    }
+                    else if (isKeyUp)
+                    {
+                        return (IntPtr)1;
+                    }
                 }
             }
 
@@ -1150,6 +1171,16 @@ class Program
                     {
                         CancelNumpadWaiting();
                     }
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+
+                // pause_key → stack_key シーケンス: Window Stack モードへ
+                if (isKeyDown && (Keys)vkCode == AppConfig.StackKey)
+                {
+                    IntPtr target = activeWindow;
+                    CancelNumpadWaiting();
+                    TryStartStackMode(target);
                     _suppressNextKeyUp = (Keys)vkCode;
                     return (IntPtr)1;
                 }
@@ -1681,6 +1712,142 @@ class Program
         ResetMouseSpeedState();
     }
 
+    // -----------------------------------------------------------------------
+    // Window Stack Mode
+    // -----------------------------------------------------------------------
+
+    private static bool _isStackMode;
+    private static IntPtr _stackBase = IntPtr.Zero;
+    private static readonly List<IntPtr> _stackTargets = new();
+    private static OverlayForm? _stackBaseOverlay;
+    private static readonly List<OverlayForm> _stackOverlays = new();
+
+    private static void TryStartStackMode(IntPtr target)
+    {
+        if (_isStackMode || _isSwapMode || _isMoveMode || _resizePhase != ResizePhase.None || _isEdgeMode || _windowSetPhase != WindowSetPhase.None) return;
+
+        // 指定が無い場合はマウスポインタ下のウィンドウ
+        if (target == IntPtr.Zero && GetCursorPos(out POINT cp))
+            target = WindowFromPoint(cp);
+        if (target == IntPtr.Zero) return;
+
+        IntPtr rootWnd = GetAncestor(target, GA_ROOT);
+        if (rootWnd == IntPtr.Zero) rootWnd = target;
+        if (IsSystemWindow(rootWnd) || IsOwnProcessWindow(rootWnd) || IsIconic(rootWnd)) return;
+        if (!GetWindowRect(rootWnd, out RECT rect)) return;
+        if (rect.Right <= rect.Left || rect.Bottom <= rect.Top) return;
+
+        _stackBase = rootWnd;
+        _stackTargets.Clear();
+        _isStackMode = true;
+        RebuildStackOverlays();
+
+        TrayIcon.ShowMessage("click window to stack", durationMs: 0, clickThrough: true);
+        ApplySwapCursor();
+    }
+
+    private static void CloseStackOverlays()
+    {
+        var all = new List<OverlayForm>(_stackOverlays);
+        if (_stackBaseOverlay != null) all.Add(_stackBaseOverlay);
+        _stackOverlays.Clear();
+        _stackBaseOverlay = null;
+        foreach (var ov in all)
+        {
+            try { ov.Hide(); } catch { }
+            if (!ov.IsDisposed && ov.IsHandleCreated)
+                ov.BeginInvoke(() => ov.Close());
+            else
+                ov.Close();
+        }
+    }
+
+    private static void RebuildStackOverlays()
+    {
+        CloseStackOverlays();
+        if (GetWindowRect(_stackBase, out RECT br))
+        {
+            _stackBaseOverlay = new OverlayForm();
+            _stackBaseOverlay.UpdateRect(br.Left, br.Top, br.Right, br.Bottom);
+            _stackBaseOverlay.Show();
+            _stackBaseOverlay.BringToTopMost();
+        }
+        foreach (var w in _stackTargets)
+        {
+            if (!GetWindowRect(w, out RECT r)) continue;
+            var ov = new OverlayForm();
+            ov.UpdateRect(r.Left, r.Top, r.Right, r.Bottom);
+            ov.Show();
+            ov.BringToTopMost();
+            _stackOverlays.Add(ov);
+        }
+    }
+
+    private static void HandleStackClick(POINT pt)
+    {
+        if (!_isStackMode) return;
+
+        // オーバーレイ・ポップアップが WindowFromPoint にヒットしないよう一旦閉じる
+        CloseStackOverlays();
+        IntPtr clicked = WindowFromPoint(pt);
+        IntPtr root = clicked == IntPtr.Zero ? IntPtr.Zero : GetAncestor(clicked, GA_ROOT);
+        if (root == IntPtr.Zero) root = clicked;
+
+        if (root != IntPtr.Zero && root != _stackBase
+            && !IsSystemWindow(root) && !IsOwnProcessWindow(root) && !IsIconic(root))
+        {
+            // 既に選択済みならトグルで解除
+            if (!_stackTargets.Remove(root))
+                _stackTargets.Add(root);
+        }
+        _stackTargets.RemoveAll(w => !IsWindow(w));
+        RebuildStackOverlays();
+    }
+
+    private static void CompleteStackMode()
+    {
+        if (!_isStackMode) return;
+        IntPtr baseWnd = _stackBase;
+        var targets = new List<IntPtr>(_stackTargets);
+        EndStackMode();
+
+        if (baseWnd == IntPtr.Zero || !IsWindow(baseWnd) || !GetWindowRect(baseWnd, out RECT rect)) return;
+        int w = rect.Right - rect.Left;
+        int h = rect.Bottom - rect.Top;
+        if (w <= 0 || h <= 0) return;
+
+        foreach (var t in targets)
+        {
+            if (!IsWindow(t) || IsIconic(t)) continue;
+            if (IsZoomed(t)) ShowWindow(t, SW_RESTORE);
+            bool cross = !string.Equals(
+                Screen.FromHandle(t).DeviceName, Screen.FromHandle(baseWnd).DeviceName,
+                StringComparison.OrdinalIgnoreCase);
+            MoveWindow(t, rect.Left, rect.Top, w, h, true);
+            if (cross) MoveWindow(t, rect.Left, rect.Top, w, h, true);
+        }
+
+        // 基準ウィンドウを最前面（アクティブ）にする
+        SetForegroundWindow(baseWnd);
+    }
+
+    private static void EndStackMode()
+    {
+        _isStackMode = false;
+        _stackBase = IntPtr.Zero;
+        _stackTargets.Clear();
+        CloseStackOverlays();
+        TrayIcon.CloseHelpPopup();
+        RestoreMoveCursor();
+        ResetMouseSpeedState();
+    }
+
+    private static void CancelStackMode()
+    {
+        if (!_isStackMode) return;
+        EndStackMode();
+    }
+
     private static void TryStartResizeMode(IntPtr preferredTarget = default)
     {
         // 既にリサイズモード中・移動モード中・入れ替えモード・Window Set モード中なら無視
@@ -1948,6 +2115,24 @@ class Program
                     EndEdgeMode(); // ホイール等
                     return (IntPtr)1;
                 }
+            }
+            else if (_isStackMode)
+            {
+                if (msg == WM_LBUTTONDOWN)
+                {
+                    _suppressNextLButtonUp = true;
+                    HandleStackClick(ms.pt);
+                    return (IntPtr)1;
+                }
+                if (msg == WM_LBUTTONUP || msg == WM_RBUTTONUP || msg == WM_MBUTTONUP)
+                {
+                    return (IntPtr)1;
+                }
+                if (msg == WM_RBUTTONDOWN) _suppressNextRButtonUp = true;
+                else if (msg == WM_MBUTTONDOWN) _suppressNextMButtonUp = true;
+
+                CancelStackMode();
+                return (IntPtr)1;
             }
             else if (_isSwapMode)
             {
@@ -2617,6 +2802,15 @@ class Program
                     EndWaitingOrClosePopup();
                     if (swapTarget != IntPtr.Zero)
                         TryStartSwapMode(swapTarget);
+                }
+                break;
+
+            case TrayIcon.HelpCommand.Stack:
+                {
+                    IntPtr stackTarget = _isWaitingForNumpad ? activeWindow : target;
+                    EndWaitingOrClosePopup();
+                    if (stackTarget != IntPtr.Zero)
+                        TryStartStackMode(stackTarget);
                 }
                 break;
 

@@ -131,6 +131,12 @@ static class AppConfig
     public static Keys SwapKey { get; private set; } = Keys.W;
 
     /// <summary>
+    /// Window Stack モードを起動するトリガーキー（デフォルト K）。
+    /// config.toml の [hotkey] stack_key に文字列で指定する。
+    /// </summary>
+    public static Keys StackKey { get; private set; } = Keys.K;
+
+    /// <summary>
     /// Window Set 機能を呼び出すトリガーキー（デフォルト G）。
     /// config.toml の [hotkey] window_set_key に文字列で指定する。
     /// </summary>
@@ -228,6 +234,10 @@ static class AppConfig
         # 2つのウィンドウの位置とサイズを入れ替えるトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "W"
         swap_key = "{KeysToString(SwapKey)}"
+
+        # Window Stack モードを起動するトリガーキー名
+        # 例: "K"
+        stack_key = "{KeysToString(StackKey)}"
 
         # Window Set 機能を呼び出すトリガーキー名（Windows Forms の Keys 列挙体の名前）
         # 例: "G", "L"
@@ -598,6 +608,12 @@ static class AppConfig
                     string name = UnquoteString(value);
                     if (TryParseKeys(name, out Keys k))
                         SwapKey = k;
+                }
+                if (key == "stack_key")
+                {
+                    string name = UnquoteString(value);
+                    if (TryParseKeys(name, out Keys k))
+                        StackKey = k;
                 }
                 if (key == "window_set_key")
                 {

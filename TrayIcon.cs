@@ -42,6 +42,7 @@ sealed class TrayIcon : IDisposable
         Close,
         Snap,
         Swap,
+        Stack,
         WindowSet,
     }
 
@@ -391,7 +392,7 @@ sealed class TrayIcon : IDisposable
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2711"),
+            new HelpItem("cs_mouse_ctrl v2611.2712"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
@@ -406,6 +407,7 @@ sealed class TrayIcon : IDisposable
             new HelpItem($"    {close}:  ウィンドウを閉じる", HelpCommand.Close),
             new HelpItem($"    {snap}:  スナップ選択 UI", HelpCommand.Snap),
             new HelpItem($"    {swap}:  ウィンドウ位置入れ替え", HelpCommand.Swap),
+            new HelpItem($"    {AppConfig.StackKey}:  ウィンドウスタック（クリックで選択→Enterで同位置・同サイズに重ねる）", HelpCommand.Stack),
             new HelpItem($"    {windowSet}:  Window Set（一覧 / 登録 / 起動 / 削除）", HelpCommand.WindowSet),
             new HelpItem("    , / . :  マウス移動速度", IsMouseSpeedRow: true),
             new HelpItem($"Alt + マウス移動:  {AppConfig.AltMultiplier.ToString(System.Globalization.CultureInfo.InvariantCulture)}倍速"),
