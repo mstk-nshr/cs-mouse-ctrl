@@ -1742,7 +1742,7 @@ class Program
         _isStackMode = true;
         RebuildStackOverlays();
 
-        TrayIcon.ShowMessage("click window to stack", durationMs: 0, clickThrough: true);
+        TrayIcon.ShowMessage("click window to select, press Enter to stack them", durationMs: 0, clickThrough: true);
         ApplySwapCursor();
     }
 

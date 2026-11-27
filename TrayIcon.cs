@@ -392,7 +392,7 @@ sealed class TrayIcon : IDisposable
 
         return new[]
         {
-            new HelpItem("cs_mouse_ctrl v2611.2712"),
+            new HelpItem("cs_mouse_ctrl v2611.2713"),
             new HelpItem(""),
             new HelpItem($"{pause} →"),
             new HelpItem("    NumPad1..9:  カーソル移動"),
