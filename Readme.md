@@ -16,6 +16,7 @@
 | Hotkey -> S | snap active window to grid position |
 | Hotkey -> E | extend an edge of active window (arrow key selects the edge) |
 | Hotkey -> W | swap position and size of two windows |
+| Hotkey -> K | stack multiple windows into the same position/size with a tab bar |
 | Hotkey -> G | Window Set (show list / register multiple apps / launch & restore layout) |
 | Hotkey -> . | increment mouse speed (1..20) |
 | Hotkey -> , | decrement mouse speed (1..20) |
@@ -257,6 +258,36 @@ Hotkey -> W 押下
 - 2つ目のウィンドウ選択中も `Alt` / `Ctrl` + マウス移動による速度変更が利用できます。
 
 
+### Window Stack（複数ウィンドウの重ね合わせ・タブ切り替え）動作フロー
+
+```
+Hotkey -> K 押下
+  ↓ 基準ウィンドウ取得（カーソル直下のウィンドウ）
+  ↓ 基準ウィンドウを半透明のアクセント色で塗りつぶし
+  ↓ 「click window to select, press Enter to stack them」を表示（カーソルを人差し指形状へ変更）
+[ウィンドウ選択（複数可）]
+  重ねたいウィンドウを左クリック → 半透明アクセント色で強調表示（再クリックで選択解除）
+  ※ 必要な回数だけ繰り返し選択可能
+[確定]
+  Enter キー押下
+  ↓ 半透明アクセント色とポップアップを消去
+  ↓ 上辺のタブバー高さ（28px）分だけ基準・選択ウィンドウの上端を下げて高さを調整し、同じ位置・サイズに重ねる
+  ↓ 基準ウィンドウを最前面（アクティブ）に切り替え
+  ↓ スタック領域の上辺に最上位（TopMost）のタブ切り替えバーを表示
+[中断]
+  Enter 以外のキー入力（修飾キーを除く）、または左クリック以外のマウス操作 → 中断して待機状態へ戻る
+```
+
+- **タブ切り替えバー**:
+  - スタックされた各ウィンドウのタイトルがタブとして表示され、クリックすると背面に隠れたウィンドウを前面（アクティブ）に切り替えられます（最小化されていた場合は復元して前面化）。
+  - アクティブなウィンドウのタブは Windows アクセントカラーで強調表示されます。右端の `×` ボタンでタブバーを閉じられます（スタック内のウィンドウが 2 つ未満になった場合も自動で閉じます）。
+- **移動・サイズ変更の追従**:
+  - スタック中のいずれかのウィンドウを移動またはリサイズすると、タブバーと背面に隠れた他のスタックウィンドウも同じ位置・サイズに自動で追従します。
+- **仮想デスクトップ切り替え対応**:
+  - Windows の仮想デスクトップを切り替えてスタックウィンドウが現在のデスクトップに無くなると、タブバーは自動的に非表示になり、元のデスクトップに戻ると再表示されます。
+- デスクトップ背景、タスクバー、最小化中のウィンドウ、および本アプリ自身のウィンドウは選択対象外です。
+
+
 ### Window Set（複数アプリ一括起動・配置復元）動作フロー
 
 ```
@@ -345,6 +376,10 @@ edge_key = "E"
 # 例: "W"
 swap_key = "W"
 
+# Window Stack モードを起動するトリガーキー名（Windows Forms の Keys 列挙体の名前）
+# 例: "K"
+stack_key = "K"
+
 # Window Set 機能を呼び出すトリガーキー名（Windows Forms の Keys 列挙体の名前）
 # 例: "G", "L"
 window_set_key = "G"
@@ -384,6 +419,7 @@ inner_spacing = 10
 | `[hotkey]` | `snap_key` | 文字列 | `"S"` | ウィンドウスナップ選択 UI を起動するキー |
 | `[hotkey]` | `edge_key` | 文字列 | `"E"` | 辺拡張モードを起動するキー |
 | `[hotkey]` | `swap_key` | 文字列 | `"W"` | 2つのウィンドウの位置とサイズを入れ替えるキー |
+| `[hotkey]` | `stack_key` | 文字列 | `"K"` | Window Stack モードを起動するキー |
 | `[hotkey]` | `window_set_key` | 文字列 | `"G"` | Window Set 機能（一覧表示 / 登録 / 起動）を呼び出すキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
