@@ -82,7 +82,29 @@ sealed class WindowStackTabForm : Form
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
 
-    private const int SW_RESTORE = 9;
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("A5CD92FF-29BE-454C-8D04-D82879FB3F1B")]
+    private interface IVirtualDesktopManager
+    {
+        [PreserveSig]
+        int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, [MarshalAs(UnmanagedType.Bool)] out bool onCurrentDesktop);
+        [PreserveSig]
+        int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
+        [PreserveSig]
+        int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
+    }
+
+    private static readonly Guid CLSID_VirtualDesktopManager = new("AA509086-5CA9-4C25-8F95-589D3C07B48A");
+    private static IVirtualDesktopManager? _vdm;
+    private static bool _vdmInitTried;
+
+    private const int DWMWA_CLOAKED = 14;
+    private const int SW_HIDE       = 0;
+    private const int SW_RESTORE    = 9;
 
     private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOPMOST    = 0x00000008;
@@ -109,6 +131,7 @@ sealed class WindowStackTabForm : Form
     private RECT _lastStackRect;
     private bool _hasStackRect;
     private bool _pendingTopAdjust;
+    private bool _hiddenByDesktop;
     private int _titleSyncCounter;
     private IntPtr _activeWindow;
     private int _hoverTabIndex = -1;
@@ -449,6 +472,28 @@ sealed class WindowStackTabForm : Form
             return;
         }
 
+        // 仮想デスクトップが切り替わり、スタック内のウィンドウが現在のデスクトップに無い場合は非表示にする
+        bool onCurrentDesktop = IsAnyWindowOnCurrentDesktop();
+        if (!onCurrentDesktop)
+        {
+            if (!_hiddenByDesktop && IsHandleCreated)
+            {
+                _hiddenByDesktop = true;
+                ShowWindow(Handle, SW_HIDE);
+            }
+            return;
+        }
+        else if (_hiddenByDesktop)
+        {
+            _hiddenByDesktop = false;
+            if (IsHandleCreated)
+            {
+                SetWindowPos(Handle, HWND_TOPMOST, Left, Top, Width, Height,
+                    SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            }
+            changed = true;
+        }
+
         // いずれかのスタックウィンドウが移動・リサイズされていたら他ウィンドウとタブバーを追従
         if (SyncGeometry())
             changed = true;
@@ -626,6 +671,51 @@ sealed class WindowStackTabForm : Form
     // -----------------------------------------------------------------------
     // ヘルパー
     // -----------------------------------------------------------------------
+
+    private bool IsAnyWindowOnCurrentDesktop()
+    {
+        if (!_vdmInitTried)
+        {
+            _vdmInitTried = true;
+            try
+            {
+                Type? t = Type.GetTypeFromCLSID(CLSID_VirtualDesktopManager);
+                if (t != null)
+                    _vdm = Activator.CreateInstance(t) as IVirtualDesktopManager;
+            }
+            catch
+            {
+                _vdm = null;
+            }
+        }
+
+        foreach (var w in _windows)
+        {
+            if (_vdm != null)
+            {
+                try
+                {
+                    if (_vdm.IsWindowOnCurrentVirtualDesktop(w, out bool onCurrent) == 0)
+                    {
+                        if (onCurrent) return true;
+                        continue;
+                    }
+                }
+                catch { }
+            }
+
+            // フォールバック: DWMWA_CLOAKED で別デスクトップ判定
+            if (DwmGetWindowAttribute(w, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0)
+            {
+                if (cloaked == 0) return true;
+            }
+            else
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static string GetWindowTitle(IntPtr hwnd)
     {
