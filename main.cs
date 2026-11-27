@@ -787,6 +787,17 @@ class Program
                 return (IntPtr)1;
             }
 
+            // スナップ UI 表示中: テンキーで即スナップ
+            if (_snapForm != null && isKeyDown && TryGetNumpadKey(vkCode, lParam, out Keys snapNumpad))
+            {
+                var sf = _snapForm;
+                if (sf.TrySelectByKey(snapNumpad))
+                {
+                    _suppressNextKeyUp = (Keys)vkCode;
+                    return (IntPtr)1;
+                }
+            }
+
             // ウィンドウ移動モード中のキー処理
             if (_isMoveMode)
             {

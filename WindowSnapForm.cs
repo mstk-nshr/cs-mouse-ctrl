@@ -100,6 +100,7 @@ sealed class WindowSnapForm : Form
 
     private readonly Font _labelFont;
     private readonly Font _titleFont;
+    private readonly Font _keyFont;
     private readonly Color _accentColor;
     private readonly System.Windows.Forms.Timer _hoverTimer;
 
@@ -120,6 +121,7 @@ sealed class WindowSnapForm : Form
         _accentColor = GetAccentColor();
         _labelFont   = new Font("Segoe UI", LabelFontSize, FontStyle.Regular, GraphicsUnit.Point);
         _titleFont   = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        _keyFont     = new Font("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
 
         FormBorderStyle = FormBorderStyle.None;
         TopMost         = true;
@@ -249,6 +251,7 @@ sealed class WindowSnapForm : Form
         using var hoverBrush  = new SolidBrush(_accentColor);
         using var dimBrush    = new SolidBrush(Color.FromArgb(55, 55, 55));
         using var labelBrush  = new SolidBrush(Color.FromArgb(180, 180, 180));
+        using var keyBrush    = new SolidBrush(Color.White);
         using var borderPen   = new Pen(Color.FromArgb(110, 110, 110), 1f);
         using var hoverPen    = new Pen(Color.White, 1f);
 
@@ -296,6 +299,10 @@ sealed class WindowSnapForm : Form
 
                         g.FillRectangle(fillBrush, cellRect);
                         g.DrawRectangle(isHovered ? hoverPen : borderPen, cellRect);
+
+                        string? keyText = GetKeyText(cols, rows, c, r);
+                        if (keyText != null)
+                            g.DrawString(keyText, _keyFont, keyBrush, cellRect, sf);
                     }
                 }
             }
@@ -397,8 +404,42 @@ sealed class WindowSnapForm : Form
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        Cancel();
+        if (!TrySelectByKey(e.KeyCode))
+            Cancel();
         e.Handled = true;
+    }
+
+    // (cols, rows, cellCol, cellRow) とテンキーの対応
+    private static readonly (Keys Key, string Text, int Cols, int Rows, int Col, int Row)[] KeyMap =
+    {
+        (Keys.NumPad8, "np8", 1, 2, 0, 0),
+        (Keys.NumPad2, "np2", 1, 2, 0, 1),
+        (Keys.NumPad4, "np4", 2, 1, 0, 0),
+        (Keys.NumPad6, "np6", 2, 1, 1, 0),
+        (Keys.NumPad7, "np7", 2, 2, 0, 0),
+        (Keys.NumPad9, "np9", 2, 2, 1, 0),
+        (Keys.NumPad1, "np1", 2, 2, 0, 1),
+        (Keys.NumPad3, "np3", 2, 2, 1, 1),
+    };
+
+    private static string? GetKeyText(int cols, int rows, int c, int r)
+    {
+        foreach (var m in KeyMap)
+            if (m.Cols == cols && m.Rows == rows && m.Col == c && m.Row == r)
+                return m.Text;
+        return null;
+    }
+
+    /// <summary>テンキーに対応するスナップを実行する。対応外なら false。</summary>
+    public bool TrySelectByKey(Keys key)
+    {
+        foreach (var m in KeyMap)
+        {
+            if (m.Key != key) continue;
+            _onSelected(_target, m.Cols, m.Rows, m.Col, m.Row);
+            return true;
+        }
+        return false;
     }
 
     // -----------------------------------------------------------------------
@@ -442,6 +483,7 @@ sealed class WindowSnapForm : Form
             _hoverTimer.Dispose();
             _labelFont.Dispose();
             _titleFont.Dispose();
+            _keyFont.Dispose();
         }
         base.Dispose(disposing);
     }
