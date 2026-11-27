@@ -427,10 +427,20 @@ class Program
     private static bool IsArrowKey(Keys k) =>
         k == Keys.Left || k == Keys.Right || k == Keys.Up || k == Keys.Down;
 
+    private static Keys EdgeAlias(Keys k) => k switch
+    {
+        Keys.W => Keys.Up,
+        Keys.S => Keys.Down,
+        Keys.A => Keys.Left,
+        Keys.D => Keys.Right,
+        _ => k,
+    };
+
     private static void StartEdgeSelecting()
     {
         if (activeWindow == IntPtr.Zero || IsSystemWindow(activeWindow)) { CancelNumpadWaiting(); return; }
         _edgeSelecting = true;
+        TrayIcon.ShowMessage("辺拡張: 矢印キー または WASD で拡張する辺を選択してください (Esc: キャンセル)", 0, clickThrough: true);
     }
 
     private static void StartEdgeMode(Keys arrow)
@@ -828,7 +838,7 @@ class Program
                 if (isKeyDown)
                 {
                     Keys k = (Keys)vkCode;
-                    if (k == _edgeKey)
+                    if (EdgeAlias(k) == _edgeKey)
                     {
                         if (!_edgeKeyReleased) return (IntPtr)1; // キーリピートは無視
                         ExtendEdgeToBoundary();
@@ -839,7 +849,7 @@ class Program
                 }
                 else if (isKeyUp)
                 {
-                    if ((Keys)vkCode == _edgeKey) _edgeKeyReleased = true;
+                    if (EdgeAlias((Keys)vkCode) == _edgeKey) _edgeKeyReleased = true;
                     return (IntPtr)1;
                 }
             }
@@ -982,7 +992,8 @@ class Program
                     if (isKeyDown)
                     {
                         Keys k = (Keys)vkCode;
-                        if (IsArrowKey(k)) StartEdgeMode(k);
+                        Keys arrow = EdgeAlias(k);
+                        if (IsArrowKey(arrow)) StartEdgeMode(arrow);
                         else { CancelNumpadWaiting(); _suppressNextKeyUp = k; }
                     }
                     return (IntPtr)1;
@@ -2358,7 +2369,8 @@ class Program
         }
 
         // 対象windowが最前面に表示された後、次のキー入力待ちの直前にヘルプを表示（次のキー入力まで表示したままにするため autoClose: false）
-        TrayIcon.ShowHelpPopup(autoClose: false, onClosed: CancelNumpadWaiting);
+        // （辺拡張の選択待ちへ移行するために閉じられた場合は NumPad 待ちを維持する）
+        TrayIcon.ShowHelpPopup(autoClose: false, onClosed: () => { if (!_edgeSelecting) CancelNumpadWaiting(); });
 
         _isWaitingForNumpad = true;
         ClipActiveWindow();
