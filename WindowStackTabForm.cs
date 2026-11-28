@@ -828,9 +828,28 @@ sealed class WindowStackTabForm : Form
                 ? _titles[idx]
                 : GetWindowTitle(hwnd);
 
+            MoveWindowTitleBarToPoint(hwnd, Cursor.Position);
             RemoveWindows(new[] { hwnd });
             TrayIcon.ShowMessage($"Stack から除外しました:\n{title}", durationMs: 3000, clickThrough: true);
         }
+    }
+
+    /// <summary>除外したウィンドウのタイトルバーがドロップ位置付近に来るよう移動する（サイズは維持）。</summary>
+    private static void MoveWindowTitleBarToPoint(IntPtr hwnd, Point pt)
+    {
+        if (!IsWindow(hwnd) || IsIconic(hwnd)) return;
+        if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+        if (!GetWindowRect(hwnd, out RECT r)) return;
+
+        int w = r.Width, h = r.Height;
+        Rectangle wa = Screen.FromPoint(pt).WorkingArea;
+
+        int left = pt.X - w / 2;
+        int top  = pt.Y - 16; // タイトルバー中央付近にカーソルが来る
+        left = Math.Max(wa.Left - w + 100, Math.Min(left, wa.Right - 100));
+        top  = Math.Max(wa.Top, Math.Min(top, wa.Bottom - 40));
+
+        SetWindowPos(hwnd, IntPtr.Zero, left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     private void OnMouseCaptureChanged(object? sender, EventArgs e)
