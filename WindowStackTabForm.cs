@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -65,6 +67,18 @@ sealed class WindowStackTabForm : Form
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -109,16 +123,67 @@ sealed class WindowStackTabForm : Form
     private const int GWL_EXSTYLE      = -20;
     private const int WS_EX_TOPMOST    = 0x00000008;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
+    private const int WS_EX_LAYERED    = 0x00080000;
     private const int WS_EX_NOACTIVATE = 0x08000000;
+
+    private const byte AC_SRC_OVER  = 0x00;
+    private const byte AC_SRC_ALPHA = 0x01;
+    private const uint ULW_ALPHA    = 0x00000002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT_API
+    {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SIZE_API
+    {
+        public int cx;
+        public int cy;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct BLENDFUNCTION
+    {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UpdateLayeredWindow(
+        IntPtr hwnd, IntPtr hdcDst, ref POINT_API pptDst, ref SIZE_API psize,
+        IntPtr hdcSrc, ref POINT_API pptSrc, uint crKey, ref BLENDFUNCTION pblend, uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr hObject);
 
     // -----------------------------------------------------------------------
     // レイアウト定数
     // -----------------------------------------------------------------------
 
     /// <summary>タブ切り替えウィンドウの高さ (px)。</summary>
-    public const int TabBarHeight = 28;
+    public static int TabBarHeight => AppConfig.StackTabBarHeight;
 
-    private const int CloseButtonWidth = 28;
+    private static int CloseButtonWidth => Math.Clamp(TabBarHeight, 20, 40);
     private const int TabPadX          = 8;
 
     // -----------------------------------------------------------------------
@@ -134,10 +199,17 @@ sealed class WindowStackTabForm : Form
     private bool _hiddenByDesktop;
     private int _titleSyncCounter;
     private IntPtr _activeWindow;
+    private IntPtr _lastObservedFg;
     private int _hoverTabIndex = -1;
     private bool _hoverClose;
+    private readonly int _initLeft;
+    private readonly int _initTop;
+    private readonly int _initWidth;
 
-    private readonly Color _accentColor;
+    private readonly Color _selectedColor;
+    private readonly Color _backgroundColor;
+    private readonly Color _hoverColor;
+    private readonly Color _barBackColor;
     private readonly Font _tabFont;
     private readonly Font _activeTabFont;
     private readonly Font _closeFont;
@@ -173,20 +245,27 @@ sealed class WindowStackTabForm : Form
         }
         _activeWindow = activeWindow;
 
-        _accentColor   = GetAccentColor();
-        _tabFont       = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-        _activeTabFont = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
-        _closeFont     = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        _selectedColor   = AppConfig.StackSelectedColor ?? GetAccentColor();
+        _backgroundColor = AppConfig.StackBackgroundColor;
+        _hoverColor      = AppConfig.StackHoverColor;
+        _barBackColor    = AppConfig.StackTabBarBgColor ?? DeriveBarBackColor(_backgroundColor);
+        _tabFont         = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
+        _activeTabFont   = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Point);
+        _closeFont       = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
 
         FormBorderStyle = FormBorderStyle.None;
+        AutoScaleMode   = AutoScaleMode.None;
         TopMost         = true;
         ShowInTaskbar   = false;
         StartPosition   = FormStartPosition.Manual;
-        BackColor       = Color.FromArgb(30, 30, 30);
         DoubleBuffered  = true;
 
-        Location   = new Point(left, top);
-        ClientSize = new Size(Math.Max(CloseButtonWidth + 40, width), TabBarHeight);
+        _initLeft  = left;
+        _initTop   = top;
+        _initWidth = Math.Max(CloseButtonWidth + 40, width);
+
+        Location   = new Point(_initLeft, _initTop);
+        ClientSize = new Size(_initWidth, TabBarHeight);
 
         _syncTimer = new System.Windows.Forms.Timer { Interval = 33 };
         _syncTimer.Tick += SyncTimer_Tick;
@@ -202,6 +281,30 @@ sealed class WindowStackTabForm : Form
     // -----------------------------------------------------------------------
 
     public bool ContainsWindow(IntPtr hwnd) => _windows.Contains(hwnd);
+
+    /// <summary>指定スクリーン座標がこのタブバーの表示領域内にあるかを返す。</summary>
+    public bool ContainsScreenPoint(int x, int y)
+    {
+        if (IsDisposed || !IsHandleCreated || !Visible || _hiddenByDesktop)
+            return false;
+        return Bounds.Contains(x, y);
+    }
+
+    /// <summary>
+    /// 現在アクティブなタブから step 分（+1: 右/次、-1: 左/前）だけ切り替える。
+    /// 両端を超えた場合は wrap-around する。
+    /// </summary>
+    public void SwitchTabByDelta(int step)
+    {
+        if (IsDisposed || _windows.Count == 0 || step == 0) return;
+
+        int count = _windows.Count;
+        int curIdx = _windows.IndexOf(_activeWindow);
+        if (curIdx < 0) curIdx = 0;
+
+        int nextIdx = ((curIdx + step) % count + count) % count;
+        ActivateWindow(_windows[nextIdx]);
+    }
 
     /// <summary>指定したウィンドウをこのスタックから除外する。残りが2未満なら自動で閉じる。</summary>
     public void RemoveWindows(IEnumerable<IntPtr> hwnds)
@@ -227,7 +330,7 @@ sealed class WindowStackTabForm : Form
         }
         if (!_windows.Contains(_activeWindow))
             _activeWindow = _windows[0];
-        Invalidate();
+        Redraw();
     }
 
     public void CloseSafe()
@@ -249,7 +352,7 @@ sealed class WindowStackTabForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            cp.ExStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE;
             return cp;
         }
     }
@@ -258,27 +361,32 @@ sealed class WindowStackTabForm : Form
     {
         base.OnHandleCreated(e);
         int exStyle = GetWindowLong(Handle, GWL_EXSTYLE);
-        exStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        exStyle |= WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE;
         SetWindowLong(Handle, GWL_EXSTYLE, exStyle);
-        SetWindowPos(Handle, HWND_TOPMOST, Left, Top, Width, Height,
+        SetWindowPos(Handle, HWND_TOPMOST, _initLeft, _initTop, _initWidth, TabBarHeight,
             SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        Redraw();
     }
 
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        SetWindowPos(Handle, HWND_TOPMOST, Left, Top, Width, Height,
+        SetWindowPos(Handle, HWND_TOPMOST, _initLeft, _initTop, _initWidth, TabBarHeight,
             SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        Redraw();
     }
 
     // -----------------------------------------------------------------------
     // レイアウト計算
     // -----------------------------------------------------------------------
 
-    private Rectangle GetCloseButtonRect() =>
+    private Rectangle GetCloseButtonSlotRect() =>
         new Rectangle(ClientSize.Width - CloseButtonWidth, 0, CloseButtonWidth, ClientSize.Height);
 
-    private Rectangle GetTabRect(int index)
+    private Rectangle GetCloseButtonRect() =>
+        ApplyButtonMargin(GetCloseButtonSlotRect());
+
+    private Rectangle GetTabSlotRect(int index)
     {
         int count = _windows.Count;
         if (count <= 0) return Rectangle.Empty;
@@ -287,6 +395,40 @@ sealed class WindowStackTabForm : Form
         int x1 = index * areaW / count;
         int x2 = (index + 1) * areaW / count;
         return new Rectangle(x1, 0, Math.Max(1, x2 - x1), ClientSize.Height);
+    }
+
+    private Rectangle GetTabRect(int index) =>
+        ApplyButtonMargin(GetTabSlotRect(index));
+
+    private static Rectangle ApplyButtonMargin(Rectangle slot)
+    {
+        if (slot.IsEmpty) return Rectangle.Empty;
+
+        int ml = AppConfig.StackButtonMarginLeft;
+        int mr = AppConfig.StackButtonMarginRight;
+        int mt = AppConfig.StackButtonMarginTop;
+        int mb = AppConfig.StackButtonMarginBottom;
+
+        int maxHoriz = Math.Max(0, slot.Width - 2);
+        if (ml + mr > maxHoriz)
+        {
+            double scale = (ml + mr) > 0 ? (double)maxHoriz / (ml + mr) : 0;
+            ml = (int)(ml * scale);
+            mr = (int)(mr * scale);
+        }
+        int maxVert = Math.Max(0, slot.Height - 2);
+        if (mt + mb > maxVert)
+        {
+            double scale = (mt + mb) > 0 ? (double)maxVert / (mt + mb) : 0;
+            mt = (int)(mt * scale);
+            mb = (int)(mb * scale);
+        }
+
+        return new Rectangle(
+            slot.Left + ml,
+            slot.Top + mt,
+            Math.Max(1, slot.Width - ml - mr),
+            Math.Max(1, slot.Height - mt - mb));
     }
 
     private int HitTestTab(Point pt)
@@ -300,22 +442,84 @@ sealed class WindowStackTabForm : Form
     }
 
     // -----------------------------------------------------------------------
-    // 描画
+    // 描画（per-pixel alpha 対応 UpdateLayeredWindow）
     // -----------------------------------------------------------------------
 
-    protected override void OnPaint(PaintEventArgs e)
+    private void Redraw()
     {
-        base.OnPaint(e);
-        var g = e.Graphics;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        if (IsDisposed || !IsHandleCreated) return;
+        int w = ClientSize.Width;
+        int h = ClientSize.Height;
+        if (w <= 0 || h <= 0) return;
 
-        using var activeBrush     = new SolidBrush(_accentColor);
-        using var normalBrush     = new SolidBrush(Color.FromArgb(45, 45, 45));
-        using var hoverBrush      = new SolidBrush(Color.FromArgb(68, 68, 68));
-        using var closeBgBrush    = new SolidBrush(Color.FromArgb(35, 35, 35));
-        using var closeHoverBrush = new SolidBrush(Color.FromArgb(196, 43, 28));
-        using var activeTextBrush = new SolidBrush(Color.White);
-        using var normalTextBrush = new SolidBrush(Color.FromArgb(215, 215, 215));
+        using var bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            RenderContent(g, w, h);
+        }
+
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr oldBitmap = IntPtr.Zero;
+        try
+        {
+            hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
+            oldBitmap = SelectObject(memDc, hBitmap);
+
+            var size = new SIZE_API { cx = w, cy = h };
+            var ptSrc = new POINT_API { x = 0, y = 0 };
+            var ptDst = new POINT_API { x = Left, y = Top };
+            var blend = new BLENDFUNCTION
+            {
+                BlendOp             = AC_SRC_OVER,
+                BlendFlags          = 0,
+                SourceConstantAlpha = (byte)Math.Clamp((int)Math.Round(AppConfig.StackOpacity * 255.0), 1, 255),
+                AlphaFormat         = AC_SRC_ALPHA,
+            };
+
+            UpdateLayeredWindow(Handle, screenDc, ref ptDst, ref size, memDc, ref ptSrc, 0, ref blend, ULW_ALPHA);
+        }
+        finally
+        {
+            if (oldBitmap != IntPtr.Zero) SelectObject(memDc, oldBitmap);
+            if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+            if (memDc != IntPtr.Zero) DeleteDC(memDc);
+            if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
+        }
+    }
+
+    private void RenderContent(Graphics g, int width, int height)
+    {
+        g.Clear(Color.Transparent);
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+        if (_barBackColor.A > 0)
+        {
+            using var barBgBrush = new SolidBrush(_barBackColor);
+            g.FillRectangle(barBgBrush, 0, 0, width, height);
+        }
+
+        bool rounded = AppConfig.StackButtonRounded && AppConfig.StackButtonCornerRadius > 0;
+        int radius = rounded ? AppConfig.StackButtonCornerRadius : 0;
+        bool hasButtonGap = rounded
+            || AppConfig.StackButtonMarginLeft > 0
+            || AppConfig.StackButtonMarginRight > 0
+            || AppConfig.StackButtonMarginTop > 0
+            || AppConfig.StackButtonMarginBottom > 0;
+
+        Color closeBgColor    = DeriveCloseBgColor(_backgroundColor);
+        Color closeHoverColor = Color.FromArgb(196, 43, 28);
+
+        using var activeBrush     = new SolidBrush(_selectedColor);
+        using var normalBrush     = new SolidBrush(_backgroundColor);
+        using var hoverBrush      = new SolidBrush(_hoverColor);
+        using var closeBgBrush    = new SolidBrush(closeBgColor);
+        using var closeHoverBrush = new SolidBrush(closeHoverColor);
+        using var activeTextBrush = new SolidBrush(GetContrastTextColor(_selectedColor, isActive: true));
+        using var normalTextBrush = new SolidBrush(GetContrastTextColor(_backgroundColor, isActive: false));
+        using var hoverTextBrush  = new SolidBrush(GetContrastTextColor(_hoverColor, isActive: false));
+        using var closeTextBrush  = new SolidBrush(GetContrastTextColor(_hoverClose ? closeHoverColor : closeBgColor, isActive: true));
         using var sepPen          = new Pen(Color.FromArgb(24, 24, 24), 1f);
         using var borderPen       = new Pen(Color.FromArgb(80, 80, 80), 1f);
 
@@ -339,33 +543,93 @@ sealed class WindowStackTabForm : Form
             bool isHovered = i == _hoverTabIndex;
 
             Brush bg = isActive ? activeBrush : isHovered ? hoverBrush : normalBrush;
-            g.FillRectangle(bg, r);
+            FillButton(g, bg, r, radius);
 
-            if (i > 0)
+            if (!hasButtonGap && i > 0)
                 g.DrawLine(sepPen, r.Left, 2, r.Left, r.Bottom - 2);
 
+            int padX = Math.Min(TabPadX, Math.Max(2, r.Width / 6));
             var textRect = new Rectangle(
-                r.Left + TabPadX,
+                r.Left + padX,
                 r.Top,
-                Math.Max(0, r.Width - TabPadX * 2),
+                Math.Max(0, r.Width - padX * 2),
                 r.Height);
             string title = i < _titles.Count ? _titles[i] : "";
+            Brush textBrush = isActive ? activeTextBrush : isHovered ? hoverTextBrush : normalTextBrush;
             g.DrawString(
                 title,
                 isActive ? _activeTabFont : _tabFont,
-                isActive ? activeTextBrush : normalTextBrush,
+                textBrush,
                 textRect,
                 tabSf);
         }
 
         // 閉じるボタン
         Rectangle closeRect = GetCloseButtonRect();
-        g.FillRectangle(_hoverClose ? closeHoverBrush : closeBgBrush, closeRect);
-        g.DrawLine(sepPen, closeRect.Left, 2, closeRect.Left, closeRect.Bottom - 2);
-        g.DrawString("×", _closeFont, activeTextBrush, closeRect, centerSf);
+        FillButton(g, _hoverClose ? closeHoverBrush : closeBgBrush, closeRect, radius);
+        if (!hasButtonGap)
+            g.DrawLine(sepPen, closeRect.Left, 2, closeRect.Left, closeRect.Bottom - 2);
+        g.DrawString("×", _closeFont, closeTextBrush, closeRect, centerSf);
 
         // 外枠
-        g.DrawRectangle(borderPen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+        if (AppConfig.StackTabBarBorder)
+            g.DrawRectangle(borderPen, 0, 0, width - 1, height - 1);
+    }
+
+    private static void FillButton(Graphics g, Brush brush, Rectangle rect, int radius)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0) return;
+
+        int r = Math.Min(radius, Math.Min(rect.Width, rect.Height) / 2);
+        if (r <= 0)
+        {
+            g.FillRectangle(brush, rect);
+            return;
+        }
+
+        var prevMode = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var path = CreateRoundedRectPath(rect, r);
+        g.FillPath(brush, path);
+        g.SmoothingMode = prevMode;
+    }
+
+    private static GraphicsPath CreateRoundedRectPath(Rectangle rect, int radius)
+    {
+        var path = new GraphicsPath();
+        int d = radius * 2;
+        path.AddArc(rect.Left, rect.Top, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Top, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    private static Color DeriveBarBackColor(Color bg)
+    {
+        return Color.FromArgb(
+            255,
+            (int)Math.Round(bg.R * 0.67),
+            (int)Math.Round(bg.G * 0.67),
+            (int)Math.Round(bg.B * 0.67));
+    }
+
+    private static Color DeriveCloseBgColor(Color bg)
+    {
+        return Color.FromArgb(
+            255,
+            (int)Math.Round(bg.R * 0.78),
+            (int)Math.Round(bg.G * 0.78),
+            (int)Math.Round(bg.B * 0.78));
+    }
+
+    private static Color GetContrastTextColor(Color bg, bool isActive)
+    {
+        double luma = 0.299 * bg.R + 0.587 * bg.G + 0.114 * bg.B;
+        if (luma > 155)
+            return isActive ? Color.FromArgb(16, 16, 16) : Color.FromArgb(40, 40, 40);
+        return isActive ? Color.White : Color.FromArgb(215, 215, 215);
     }
 
     // -----------------------------------------------------------------------
@@ -381,7 +645,7 @@ sealed class WindowStackTabForm : Form
         {
             _hoverTabIndex = newTab;
             _hoverClose    = newClose;
-            Invalidate();
+            Redraw();
         }
     }
 
@@ -391,7 +655,7 @@ sealed class WindowStackTabForm : Form
         {
             _hoverTabIndex = -1;
             _hoverClose    = false;
-            Invalidate();
+            Redraw();
         }
     }
 
@@ -435,15 +699,51 @@ sealed class WindowStackTabForm : Form
                 _lastWindowRects[hwnd] = actual;
         }
 
-        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-        SetForegroundWindow(hwnd);
+        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        ForceForeground(hwnd);
 
         // タブバー自身は常に最上位を維持
         if (IsHandleCreated)
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
         _activeWindow = hwnd;
-        Invalidate();
+        _lastObservedFg = GetForegroundWindow();
+        Redraw();
+    }
+
+    /// <summary>
+    /// マウスホイール等の非クリック起点からでも確実に他プロセスウィンドウを前面化する。
+    /// </summary>
+    private static void ForceForeground(IntPtr hwnd)
+    {
+        if (SetForegroundWindow(hwnd) && GetForegroundWindow() == hwnd)
+            return;
+
+        IntPtr fg = GetForegroundWindow();
+        uint curThread = GetCurrentThreadId();
+        uint fgThread = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, out _) : 0;
+        uint targetThread = GetWindowThreadProcessId(hwnd, out _);
+
+        bool attachedFg = false;
+        bool attachedTarget = false;
+        try
+        {
+            if (fgThread != 0 && fgThread != curThread)
+                attachedFg = AttachThreadInput(curThread, fgThread, true);
+            if (targetThread != 0 && targetThread != curThread && targetThread != fgThread)
+                attachedTarget = AttachThreadInput(curThread, targetThread, true);
+
+            BringWindowToTop(hwnd);
+            SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            if (attachedTarget) AttachThreadInput(curThread, targetThread, false);
+            if (attachedFg) AttachThreadInput(curThread, fgThread, false);
+        }
+
+        if (GetForegroundWindow() != hwnd)
+            SwitchToThisWindow(hwnd, true);
     }
 
     // -----------------------------------------------------------------------
@@ -515,18 +815,22 @@ sealed class WindowStackTabForm : Form
         }
 
         IntPtr fg = GetForegroundWindow();
-        if (fg != IntPtr.Zero && _windows.Contains(fg) && _activeWindow != fg)
+        if (fg != _lastObservedFg)
         {
-            _activeWindow = fg;
-            changed = true;
+            _lastObservedFg = fg;
+            if (fg != IntPtr.Zero && _windows.Contains(fg) && _activeWindow != fg)
+            {
+                _activeWindow = fg;
+                changed = true;
+            }
         }
-        else if (!_windows.Contains(_activeWindow))
+        if (!_windows.Contains(_activeWindow))
         {
             _activeWindow = _windows[0];
             changed = true;
         }
 
-        if (changed) Invalidate();
+        if (changed) Redraw();
     }
 
     /// <summary>

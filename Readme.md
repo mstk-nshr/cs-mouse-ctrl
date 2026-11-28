@@ -280,6 +280,7 @@ Hotkey -> K 押下
 
 - **タブ切り替えバー**:
   - スタックされた各ウィンドウのタイトルがタブとして表示され、クリックすると背面に隠れたウィンドウを前面（アクティブ）に切り替えられます（最小化されていた場合は復元して前面化）。
+  - タブバー上でマウスホイールを上下に回転すると、表示するスタックウィンドウを順次切り替えられます（上回転で左／前のタブ、下回転で右／次のタブ。左端・右端に達すると反対端へ wrap-around します）。
   - アクティブなウィンドウのタブは Windows アクセントカラーで強調表示されます。右端の `×` ボタンでタブバーを閉じられます（スタック内のウィンドウが 2 つ未満になった場合も自動で閉じます）。
 - **移動・サイズ変更の追従**:
   - スタック中のいずれかのウィンドウを移動またはリサイズすると、タブバーと背面に隠れた他のスタックウィンドウも同じ位置・サイズに自動で追従します。
@@ -390,6 +391,31 @@ outer_spacing = [10, 10, 10, 10]
 # ウィンドウ間の余白（px）
 inner_spacing = 10
 
+[window_stack]
+# タブバーの高さ（px、最小 16）
+tab_bar_height = 28
+# 選択中タブの色（"#RRGGBB" 形式、または "accent" で Windows アクセントカラー）
+selected_color = "accent"
+# 背景色（"#RRGGBB" 形式）
+background_color = "#2D2D2D"
+# ホバー色（"#RRGGBB" 形式）
+hover_color = "#444444"
+# 透過率 / 不透明度（0.1〜1.0、1.0 で不透明、値が小さいほど透過）
+opacity = 1.0
+# ボタンのマージン（px）
+button_margin_top = 0
+button_margin_bottom = 0
+button_margin_left = 0
+button_margin_right = 0
+# ボタンの角を丸めるか（true / false）
+button_rounded = false
+# ボタンの角丸半径（px、button_rounded = true のときに有効）
+button_corner_radius = 6
+# タブバー外周枠を描画するか（true / false）
+tab_bar_border = true
+# タブバーウィンドウの背景色（"#RRGGBBAA" 形式、AA=00 で完全透過・FF で不透明）
+tab_bar_bg_rgba = "#1E1E1EFF"
+
 # Window Set 登録データ（登録モードから自動追記されます）
 # [[window_set.1]]
 # app_path = "C:\\Windows\\System32\\notepad.exe"
@@ -423,6 +449,19 @@ inner_spacing = 10
 | `[hotkey]` | `window_set_key` | 文字列 | `"G"` | Window Set 機能（一覧表示 / 登録 / 起動）を呼び出すキー |
 | `[window_fit]` | `outer_spacing` | 整数配列 | `[10, 10, 10, 10]` | デスクトップ端との余白（上, 右, 下, 左） |
 | `[window_fit]` | `inner_spacing` | 整数 | `10` | ウィンドウ間の余白 |
+| `[window_stack]` | `tab_bar_height` | 整数 | `28` | Window Stack タブバーの高さ（px、最小 16） |
+| `[window_stack]` | `selected_color` | 文字列 | `"accent"` | 選択中タブの背景色（`"#RRGGBB"` 形式、または `"accent"` で Windows アクセントカラー） |
+| `[window_stack]` | `background_color` | 文字列 | `"#2D2D2D"` | 非選択タブ・タブバーの背景色（`"#RRGGBB"` 形式） |
+| `[window_stack]` | `hover_color` | 文字列 | `"#444444"` | ホバー中タブの背景色（`"#RRGGBB"` 形式） |
+| `[window_stack]` | `opacity` | 小数 | `1.0` | タブバーの不透明度（`0.1`〜`1.0`、値が小さいほど透過） |
+| `[window_stack]` | `button_margin_top` | 整数 | `0` | タブボタンの上マージン（px） |
+| `[window_stack]` | `button_margin_bottom` | 整数 | `0` | タブボタンの下マージン（px） |
+| `[window_stack]` | `button_margin_left` | 整数 | `0` | タブボタンの左マージン（px） |
+| `[window_stack]` | `button_margin_right` | 整数 | `0` | タブボタンの右マージン（px） |
+| `[window_stack]` | `button_rounded` | 真偽値 | `false` | タブボタンの角を丸めるか（`true` / `false`） |
+| `[window_stack]` | `button_corner_radius` | 整数 | `6` | タブボタンの角丸半径（px、`button_rounded = true` のときに有効） |
+| `[window_stack]` | `tab_bar_border` | 真偽値 | `true` | タブバーウィンドウの外周枠を描画するか（`true` / `false`） |
+| `[window_stack]` | `tab_bar_bg_rgba` | 文字列 | `"#1E1E1EFF"` | タブバーウィンドウの背景色（`"#RRGGBBAA"` 形式、`AA=00` で完全透過・`FF` で不透明） |
 
 > [!NOTE]
 > 各ホットキー設定には [Windows Forms の `Keys` 列挙体](https://learn.microsoft.com/ja-jp/dotnet/api/system.windows.forms.keys)の名前を指定します（例: `"Pause"`, `"R"`, `"F12"`, `"ScrollLock"`, `"F"`, `"T"`, `"B"`, `"I"`, `"A"`, `"X"`）。

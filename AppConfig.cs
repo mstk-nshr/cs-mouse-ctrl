@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -161,6 +163,63 @@ static class AppConfig
     /// </summary>
     public static int InnerSpacing { get; private set; } = 10;
 
+    /// <summary>
+    /// Window Stack タブバーの高さ（px、デフォルト 28、最小 16）。
+    /// config.toml の [window_stack] tab_bar_height に整数で指定する。
+    /// </summary>
+    public static int StackTabBarHeight { get; private set; } = 28;
+
+    /// <summary>
+    /// Window Stack タブバーの選択中タブ背景色（null の場合は Windows アクセントカラー）。
+    /// config.toml の [window_stack] selected_color に "#RRGGBB" または "accent" で指定する。
+    /// </summary>
+    public static Color? StackSelectedColor { get; private set; } = null;
+
+    /// <summary>
+    /// Window Stack タブバーの非選択タブ背景色（デフォルト #2D2D2D）。
+    /// config.toml の [window_stack] background_color に "#RRGGBB" で指定する。
+    /// </summary>
+    public static Color StackBackgroundColor { get; private set; } = Color.FromArgb(45, 45, 45);
+
+    /// <summary>
+    /// Window Stack タブバーのホバー中タブ背景色（デフォルト #444444）。
+    /// config.toml の [window_stack] hover_color に "#RRGGBB" で指定する。
+    /// </summary>
+    public static Color StackHoverColor { get; private set; } = Color.FromArgb(68, 68, 68);
+
+    /// <summary>
+    /// Window Stack タブバーの不透明度（0.1〜1.0、デフォルト 1.0）。
+    /// config.toml の [window_stack] opacity に小数で指定する。
+    /// </summary>
+    public static double StackOpacity { get; private set; } = 1.0;
+
+    /// <summary>Window Stack タブボタンの上マージン（px、デフォルト 0）。</summary>
+    public static int StackButtonMarginTop { get; private set; } = 0;
+
+    /// <summary>Window Stack タブボタンの下マージン（px、デフォルト 0）。</summary>
+    public static int StackButtonMarginBottom { get; private set; } = 0;
+
+    /// <summary>Window Stack タブボタンの左マージン（px、デフォルト 0）。</summary>
+    public static int StackButtonMarginLeft { get; private set; } = 0;
+
+    /// <summary>Window Stack タブボタンの右マージン（px、デフォルト 0）。</summary>
+    public static int StackButtonMarginRight { get; private set; } = 0;
+
+    /// <summary>Window Stack タブボタンの角を丸めるか（デフォルト false）。</summary>
+    public static bool StackButtonRounded { get; private set; } = false;
+
+    /// <summary>Window Stack タブボタンの角丸半径（px、デフォルト 6）。</summary>
+    public static int StackButtonCornerRadius { get; private set; } = 6;
+
+    /// <summary>Window Stack タブバーの外周枠を描画するか（デフォルト true）。</summary>
+    public static bool StackTabBarBorder { get; private set; } = true;
+
+    /// <summary>
+    /// Window Stack タブバーウィンドウの背景色（RGBA、null の場合は background_color から自動算出）。
+    /// config.toml の [window_stack] tab_bar_bg_rgba に "#RRGGBBAA" で指定する。
+    /// </summary>
+    public static Color? StackTabBarBgColor { get; private set; } = null;
+
     // -----------------------------------------------------------------------
     // パス
     // -----------------------------------------------------------------------
@@ -248,6 +307,31 @@ static class AppConfig
         outer_spacing = [{OuterSpacing[0]}, {OuterSpacing[1]}, {OuterSpacing[2]}, {OuterSpacing[3]}]
         # ウィンドウ間の余白（px）
         inner_spacing = {InnerSpacing}
+
+        [window_stack]
+        # タブバーの高さ（px、最小 16）
+        tab_bar_height = {StackTabBarHeight}
+        # 選択中タブの色（"#RRGGBB" 形式、または "accent" で Windows アクセントカラー）
+        selected_color = "{(StackSelectedColor.HasValue ? ColorToHex(StackSelectedColor.Value) : "accent")}"
+        # 背景色（"#RRGGBB" 形式）
+        background_color = "{ColorToHex(StackBackgroundColor)}"
+        # ホバー色（"#RRGGBB" 形式）
+        hover_color = "{ColorToHex(StackHoverColor)}"
+        # 透過率 / 不透明度（0.1〜1.0、1.0 で不透明、値が小さいほど透過）
+        opacity = {StackOpacity.ToString("0.##", CultureInfo.InvariantCulture)}
+        # ボタンのマージン（px）
+        button_margin_top = {StackButtonMarginTop}
+        button_margin_bottom = {StackButtonMarginBottom}
+        button_margin_left = {StackButtonMarginLeft}
+        button_margin_right = {StackButtonMarginRight}
+        # ボタンの角を丸めるか（true / false）
+        button_rounded = {(StackButtonRounded ? "true" : "false")}
+        # ボタンの角丸半径（px、button_rounded = true のときに有効）
+        button_corner_radius = {StackButtonCornerRadius}
+        # タブバー外周枠を描画するか（true / false）
+        tab_bar_border = {(StackTabBarBorder ? "true" : "false")}
+        # タブバーウィンドウの背景色（"#RRGGBBAA" 形式、AA=00 で完全透過・FF で不透明）
+        tab_bar_bg_rgba = "{ColorToHexRgba(StackTabBarBgColor ?? Color.FromArgb(255, 30, 30, 30))}"
         """;
 
     // -----------------------------------------------------------------------
@@ -635,6 +719,84 @@ static class AppConfig
                     InnerSpacing = inner;
                 }
                 break;
+
+            case "window_stack":
+                switch (key)
+                {
+                    case "tab_bar_height":
+                        if (int.TryParse(value, out int tbh))
+                            StackTabBarHeight = Math.Max(16, tbh);
+                        break;
+                    case "selected_color":
+                        {
+                            string raw = UnquoteString(value).Trim();
+                            if (raw.Length == 0 || string.Equals(raw, "accent", StringComparison.OrdinalIgnoreCase))
+                                StackSelectedColor = null;
+                            else if (TryParseColor(raw, out Color sc))
+                                StackSelectedColor = sc;
+                        }
+                        break;
+                    case "background_color":
+                        if (TryParseColor(UnquoteString(value), out Color bgc))
+                            StackBackgroundColor = bgc;
+                        break;
+                    case "hover_color":
+                        if (TryParseColor(UnquoteString(value), out Color hc))
+                            StackHoverColor = hc;
+                        break;
+                    case "opacity":
+                        if (TryParseOpacity(value, out double op))
+                            StackOpacity = op;
+                        break;
+                    case "button_margin_top":
+                        if (int.TryParse(value, out int mt) && mt >= 0)
+                            StackButtonMarginTop = mt;
+                        break;
+                    case "button_margin_bottom":
+                        if (int.TryParse(value, out int mb) && mb >= 0)
+                            StackButtonMarginBottom = mb;
+                        break;
+                    case "button_margin_left":
+                        if (int.TryParse(value, out int ml) && ml >= 0)
+                            StackButtonMarginLeft = ml;
+                        break;
+                    case "button_margin_right":
+                        if (int.TryParse(value, out int mr) && mr >= 0)
+                            StackButtonMarginRight = mr;
+                        break;
+                    case "button_margin":
+                        if (TryParseIntArray(value, out int[] margins) && margins.Length == 4
+                            && margins.All(m => m >= 0))
+                        {
+                            StackButtonMarginTop    = margins[0];
+                            StackButtonMarginRight  = margins[1];
+                            StackButtonMarginBottom = margins[2];
+                            StackButtonMarginLeft   = margins[3];
+                        }
+                        break;
+                    case "button_rounded":
+                        if (bool.TryParse(UnquoteString(value).Trim(), out bool br))
+                            StackButtonRounded = br;
+                        break;
+                    case "button_corner_radius":
+                        if (int.TryParse(value, out int rad) && rad >= 0)
+                            StackButtonCornerRadius = rad;
+                        break;
+                    case "tab_bar_border":
+                        if (bool.TryParse(UnquoteString(value).Trim(), out bool tbb))
+                            StackTabBarBorder = tbb;
+                        break;
+                    case "tab_bar_bg_rgba":
+                        {
+                            string raw = UnquoteString(value).Trim();
+                            if (raw.Length == 0 || string.Equals(raw, "auto", StringComparison.OrdinalIgnoreCase))
+                                StackTabBarBgColor = null;
+                            else if (TryParseColorRgba(raw, out Color barBg))
+                                StackTabBarBgColor = barBg;
+                        }
+                        break;
+                }
+                break;
         }
     }
 
@@ -847,9 +1009,93 @@ static class AppConfig
     private static bool TryParseMultiplier(string s, out double result)
     {
         return double.TryParse(s.Trim().Replace(',', '.'),
-                               System.Globalization.NumberStyles.Float,
-                               System.Globalization.CultureInfo.InvariantCulture,
+                               NumberStyles.Float,
+                               CultureInfo.InvariantCulture,
                                out result) && result > 0 && !double.IsInfinity(result) && !double.IsNaN(result);
+    }
+
+    /// <summary>不透明度の文字列（"0.85", "1.0" 等）を double へパースする（0.1〜1.0 にクランプ）。</summary>
+    private static bool TryParseOpacity(string s, out double result)
+    {
+        if (!double.TryParse(s.Trim().Replace(',', '.'),
+                             NumberStyles.Float,
+                             CultureInfo.InvariantCulture,
+                             out double parsed)
+            || double.IsInfinity(parsed) || double.IsNaN(parsed) || parsed <= 0)
+        {
+            result = 1.0;
+            return false;
+        }
+        result = Math.Clamp(parsed, 0.1, 1.0);
+        return true;
+    }
+
+    /// <summary>色文字列（"#RRGGBB", "#RGB", 既知の色名）を Color へパースする。</summary>
+    private static bool TryParseColor(string s, out Color color)
+    {
+        color = Color.Empty;
+        s = s.Trim();
+        if (s.Length == 0) return false;
+
+        string hex = s.StartsWith('#') ? s[1..] : s;
+        if (hex.Length == 6
+            && int.TryParse(hex[0..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int r)
+            && int.TryParse(hex[2..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int g)
+            && int.TryParse(hex[4..6], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int b))
+        {
+            color = Color.FromArgb(255, r, g, b);
+            return true;
+        }
+        if (hex.Length == 3
+            && int.TryParse(hex[0..1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int r3)
+            && int.TryParse(hex[1..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int g3)
+            && int.TryParse(hex[2..3], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int b3))
+        {
+            color = Color.FromArgb(255, r3 * 17, g3 * 17, b3 * 17);
+            return true;
+        }
+
+        Color named = Color.FromName(s);
+        if (named.IsKnownColor)
+        {
+            color = Color.FromArgb(255, named.R, named.G, named.B);
+            return true;
+        }
+        return false;
+    }
+
+    private static string ColorToHex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+
+    private static string ColorToHexRgba(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}{c.A:X2}";
+
+    /// <summary>RGBA 色文字列（"#RRGGBBAA", "#RGBA", "#RRGGBB", "#RGB", 既知の色名）を Color へパースする。</summary>
+    private static bool TryParseColorRgba(string s, out Color color)
+    {
+        color = Color.Empty;
+        s = s.Trim();
+        if (s.Length == 0) return false;
+
+        string hex = s.StartsWith('#') ? s[1..] : s;
+        if (hex.Length == 8
+            && int.TryParse(hex[0..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int r)
+            && int.TryParse(hex[2..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int g)
+            && int.TryParse(hex[4..6], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int b)
+            && int.TryParse(hex[6..8], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int a))
+        {
+            color = Color.FromArgb(a, r, g, b);
+            return true;
+        }
+        if (hex.Length == 4
+            && int.TryParse(hex[0..1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int r4)
+            && int.TryParse(hex[1..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int g4)
+            && int.TryParse(hex[2..3], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int b4)
+            && int.TryParse(hex[3..4], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int a4))
+        {
+            color = Color.FromArgb(a4 * 17, r4 * 17, g4 * 17, b4 * 17);
+            return true;
+        }
+
+        return TryParseColor(s, out color);
     }
 
     private static bool TryParseKeys(string name, out Keys key)

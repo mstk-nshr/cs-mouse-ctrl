@@ -1868,8 +1868,21 @@ class Program
         // 基準ウィンドウを最前面（アクティブ）にする
         SetForegroundWindow(baseWnd);
 
+        // 移動後の基準ウィンドウの実矩形に合わせてタブバー位置・幅を確定
+        int tabLeft = rect.Left;
+        int tabTop  = rect.Top;
+        int tabW    = w;
+        if (GetWindowRect(baseWnd, out RECT actualBase)
+            && actualBase.Right > actualBase.Left && actualBase.Bottom > actualBase.Top)
+        {
+            Rectangle wa = Screen.FromHandle(baseWnd).WorkingArea;
+            tabLeft = actualBase.Left;
+            tabTop  = Math.Max(wa.Top, actualBase.Top - tabH);
+            tabW    = actualBase.Right - actualBase.Left;
+        }
+
         // タブ切り替えウィンドウをスタック領域の上辺（最上位）に表示
-        var tabForm = new WindowStackTabForm(allStackWindows, rect.Left, rect.Top, w, baseWnd);
+        var tabForm = new WindowStackTabForm(allStackWindows, tabLeft, tabTop, tabW, baseWnd);
         tabForm.FormClosed += (_, _) => _stackTabForms.Remove(tabForm);
         _stackTabForms.Add(tabForm);
         tabForm.Show();
@@ -1880,6 +1893,37 @@ class Program
         foreach (var form in _stackTabForms.ToArray())
             form.CloseSafe();
         _stackTabForms.Clear();
+    }
+
+    private static int _stackWheelAccum;
+    private static long _stackWheelLastTick;
+
+    private static bool TryHandleStackTabWheel(POINT pt, short delta)
+    {
+        for (int i = _stackTabForms.Count - 1; i >= 0; i--)
+        {
+            var form = _stackTabForms[i];
+            if (form.IsDisposed) continue;
+            if (form.ContainsScreenPoint(pt.X, pt.Y))
+            {
+                long now = Environment.TickCount64;
+                if (now - _stackWheelLastTick > 300 || (_stackWheelAccum != 0 && Math.Sign(_stackWheelAccum) != Math.Sign(delta)))
+                    _stackWheelAccum = 0;
+                _stackWheelLastTick = now;
+                _stackWheelAccum += delta;
+
+                const int WheelDelta = 120;
+                if (Math.Abs(_stackWheelAccum) >= WheelDelta)
+                {
+                    int step = _stackWheelAccum > 0 ? -1 : 1;
+                    _stackWheelAccum = 0;
+                    if (form.IsHandleCreated)
+                        form.BeginInvoke(() => form.SwitchTabByDelta(step));
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void EndStackMode()
@@ -2315,6 +2359,12 @@ class Program
                     CancelMoveMode();
                     return (IntPtr)1;
                 }
+            }
+            else if (msg == WM_MOUSEWHEEL && _stackTabForms.Count > 0)
+            {
+                short delta = (short)((ms.mouseData >> 16) & 0xFFFF);
+                if (delta != 0 && TryHandleStackTabWheel(ms.pt, delta))
+                    return (IntPtr)1;
             }
         }
 
