@@ -202,6 +202,7 @@ sealed class WindowStackTabForm : Form
     private IntPtr _lastObservedFg;
     private int _hoverTabIndex = -1;
     private bool _hoverClose;
+    private bool _isDropTarget;
     private readonly int _initLeft;
     private readonly int _initTop;
     private readonly int _initWidth;
@@ -304,6 +305,96 @@ sealed class WindowStackTabForm : Form
 
         int nextIdx = ((curIdx + step) % count + count) % count;
         ActivateWindow(_windows[nextIdx]);
+    }
+
+    /// <summary>ドラッグ中のウィンドウをドロップ対象としてハイライト表示するか設定する。</summary>
+    public void SetDropTargetHighlight(bool highlight)
+    {
+        if (IsDisposed || _isDropTarget == highlight) return;
+        _isDropTarget = highlight;
+        Redraw();
+    }
+
+    /// <summary>
+    /// 未管理ウィンドウをこのスタックに追加し、位置・サイズを合わせてアクティブタブとして前面表示する。
+    /// </summary>
+    public void AddWindowAndActivate(IntPtr hwnd)
+    {
+        if (IsDisposed || hwnd == IntPtr.Zero || !IsWindow(hwnd) || IsIconic(hwnd))
+            return;
+
+        if (_windows.Contains(hwnd))
+        {
+            ActivateWindow(hwnd);
+            return;
+        }
+
+        // 現在のスタック矩形を決定
+        int targetLeft, targetTop, targetWidth, targetHeight;
+        bool activeZoomed = _activeWindow != IntPtr.Zero && IsWindow(_activeWindow) && IsZoomed(_activeWindow);
+        if (activeZoomed)
+        {
+            Rectangle wa = Screen.FromHandle(_activeWindow).WorkingArea;
+            targetLeft   = wa.Left;
+            targetTop    = wa.Top + TabBarHeight;
+            targetWidth  = wa.Width;
+            targetHeight = Math.Max(100, wa.Height - TabBarHeight);
+        }
+        else if (_hasStackRect && _lastStackRect.Width > 0 && _lastStackRect.Height > 0)
+        {
+            targetLeft   = _lastStackRect.Left;
+            targetTop    = _lastStackRect.Top;
+            targetWidth  = _lastStackRect.Width;
+            targetHeight = _lastStackRect.Height;
+        }
+        else if (_activeWindow != IntPtr.Zero && GetWindowRect(_activeWindow, out RECT ar)
+                 && ar.Width > 0 && ar.Height > 0)
+        {
+            targetLeft   = ar.Left;
+            targetTop    = ar.Top;
+            targetWidth  = ar.Width;
+            targetHeight = ar.Height;
+        }
+        else
+        {
+            return;
+        }
+
+        if (IsZoomed(hwnd))
+            ShowWindow(hwnd, SW_RESTORE);
+
+        string stackDevice = _windows.Count > 0
+            ? Screen.FromHandle(_windows[0]).DeviceName
+            : Screen.FromHandle(Handle).DeviceName;
+        bool crossMonitor = !string.Equals(
+            Screen.FromHandle(hwnd).DeviceName, stackDevice, StringComparison.OrdinalIgnoreCase);
+
+        SetWindowPos(hwnd, IntPtr.Zero, targetLeft, targetTop, targetWidth, targetHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        if (crossMonitor)
+        {
+            SetWindowPos(hwnd, IntPtr.Zero, targetLeft, targetTop, targetWidth, targetHeight,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+
+        _windows.Add(hwnd);
+        _titles.Add(GetWindowTitle(hwnd));
+        if (GetWindowRect(hwnd, out RECT actual))
+        {
+            _lastWindowRects[hwnd] = actual;
+        }
+        else
+        {
+            _lastWindowRects[hwnd] = new RECT
+            {
+                Left   = targetLeft,
+                Top    = targetTop,
+                Right  = targetLeft + targetWidth,
+                Bottom = targetTop + targetHeight,
+            };
+        }
+
+        ActivateWindow(hwnd);
     }
 
     /// <summary>指定したウィンドウをこのスタックから除外する。残りが2未満なら自動で閉じる。</summary>
@@ -574,6 +665,15 @@ sealed class WindowStackTabForm : Form
         // 外枠
         if (AppConfig.StackTabBarBorder)
             g.DrawRectangle(borderPen, 0, 0, width - 1, height - 1);
+
+        // ドラッグ＆ドロップ受け入れハイライト
+        if (_isDropTarget)
+        {
+            using var dropOverlay = new SolidBrush(Color.FromArgb(64, _selectedColor));
+            using var dropPen     = new Pen(_selectedColor, 2f);
+            g.FillRectangle(dropOverlay, 0, 0, width, height);
+            g.DrawRectangle(dropPen, 1, 1, Math.Max(1, width - 2), Math.Max(1, height - 2));
+        }
     }
 
     private static void FillButton(Graphics g, Brush brush, Rectangle rect, int radius)

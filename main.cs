@@ -1898,6 +1898,160 @@ class Program
     private static int _stackWheelAccum;
     private static long _stackWheelLastTick;
 
+    // タイトルバードラッグによる既存スタックへの追加（ドロップ）追跡
+    private static IntPtr _stackDropCandidateHwnd = IntPtr.Zero;
+    private static RECT _stackDropStartRect;
+    private static bool _stackDropStartZoomed;
+    private static bool _stackDropIsDragging;
+    private static WindowStackTabForm? _stackDropHighlightedForm;
+
+    private static bool IsManagedByAnyStack(IntPtr hwnd)
+    {
+        foreach (var form in _stackTabForms)
+        {
+            if (!form.IsDisposed && form.ContainsWindow(hwnd))
+                return true;
+        }
+        return false;
+    }
+
+    private static void ClearStackDropHighlight()
+    {
+        if (_stackDropHighlightedForm != null)
+        {
+            var prev = _stackDropHighlightedForm;
+            _stackDropHighlightedForm = null;
+            if (!prev.IsDisposed && prev.IsHandleCreated)
+                prev.BeginInvoke(() => prev.SetDropTargetHighlight(false));
+        }
+    }
+
+    private static void ResetStackDropState()
+    {
+        _stackDropCandidateHwnd = IntPtr.Zero;
+        _stackDropStartZoomed = false;
+        _stackDropIsDragging = false;
+        ClearStackDropHighlight();
+    }
+
+    private static WindowStackTabForm? FindStackTabFormAt(POINT pt)
+    {
+        for (int i = _stackTabForms.Count - 1; i >= 0; i--)
+        {
+            var form = _stackTabForms[i];
+            if (!form.IsDisposed && form.ContainsScreenPoint(pt.X, pt.Y))
+                return form;
+        }
+        return null;
+    }
+
+    private static void HandleStackDropMouseEvent(int msg, POINT pt)
+    {
+        if (_stackTabForms.Count == 0)
+        {
+            if (_stackDropCandidateHwnd != IntPtr.Zero || _stackDropHighlightedForm != null)
+                ResetStackDropState();
+            return;
+        }
+
+        if (msg == WM_LBUTTONDOWN)
+        {
+            ResetStackDropState();
+            IntPtr clicked = WindowFromPoint(pt);
+            IntPtr root = clicked == IntPtr.Zero ? IntPtr.Zero : GetAncestor(clicked, GA_ROOT);
+            if (root == IntPtr.Zero) root = clicked;
+
+            if (root != IntPtr.Zero
+                && !IsSystemWindow(root)
+                && !IsOwnProcessWindow(root)
+                && !IsIconic(root)
+                && !IsManagedByAnyStack(root)
+                && GetWindowRect(root, out RECT startRect)
+                && startRect.Right > startRect.Left && startRect.Bottom > startRect.Top)
+            {
+                _stackDropCandidateHwnd = root;
+                _stackDropStartRect = startRect;
+                _stackDropStartZoomed = IsZoomed(root);
+                _stackDropIsDragging = false;
+            }
+            return;
+        }
+
+        if (msg == WM_MOUSEMOVE)
+        {
+            if (_stackDropCandidateHwnd == IntPtr.Zero) return;
+
+            // 左ボタンが既に離れていたらリセット
+            if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+            {
+                ResetStackDropState();
+                return;
+            }
+
+            if (!IsWindow(_stackDropCandidateHwnd) || IsIconic(_stackDropCandidateHwnd))
+            {
+                ResetStackDropState();
+                return;
+            }
+
+            if (!_stackDropIsDragging && GetWindowRect(_stackDropCandidateHwnd, out RECT curRect))
+            {
+                bool moved = curRect.Left != _stackDropStartRect.Left || curRect.Top != _stackDropStartRect.Top;
+                bool sameSize = (curRect.Right - curRect.Left) == (_stackDropStartRect.Right - _stackDropStartRect.Left)
+                             && (curRect.Bottom - curRect.Top) == (_stackDropStartRect.Bottom - _stackDropStartRect.Top);
+
+                if (moved && (sameSize || (_stackDropStartZoomed && !IsZoomed(_stackDropCandidateHwnd))))
+                {
+                    _stackDropIsDragging = true;
+                }
+            }
+
+            if (_stackDropIsDragging)
+            {
+                var targetForm = FindStackTabFormAt(pt);
+                if (targetForm != _stackDropHighlightedForm)
+                {
+                    ClearStackDropHighlight();
+                    if (targetForm != null && targetForm.IsHandleCreated)
+                    {
+                        _stackDropHighlightedForm = targetForm;
+                        targetForm.BeginInvoke(() => targetForm.SetDropTargetHighlight(true));
+                    }
+                }
+            }
+            return;
+        }
+
+        if (msg == WM_LBUTTONUP)
+        {
+            IntPtr droppedHwnd = _stackDropCandidateHwnd;
+            bool wasDragging = _stackDropIsDragging;
+            ResetStackDropState();
+
+            if (!wasDragging || droppedHwnd == IntPtr.Zero) return;
+            if (!IsWindow(droppedHwnd) || IsIconic(droppedHwnd) || IsManagedByAnyStack(droppedHwnd)) return;
+
+            var targetForm = FindStackTabFormAt(pt);
+            if (targetForm != null && targetForm.IsHandleCreated)
+            {
+                // ドロップ元ウィンドウが WM_LBUTTONUP / WM_EXITSIZEMOVE を完了した直後にスタックへ追加する
+                targetForm.BeginInvoke(() =>
+                {
+                    if (targetForm.IsDisposed) return;
+                    var delay = new System.Windows.Forms.Timer { Interval = 40 };
+                    delay.Tick += (_, _) =>
+                    {
+                        delay.Stop();
+                        delay.Dispose();
+                        if (!targetForm.IsDisposed && IsWindow(droppedHwnd) && !IsManagedByAnyStack(droppedHwnd))
+                            targetForm.AddWindowAndActivate(droppedHwnd);
+                    };
+                    delay.Start();
+                });
+            }
+        }
+    }
+
     private static bool TryHandleStackTabWheel(POINT pt, short delta)
     {
         for (int i = _stackTabForms.Count - 1; i >= 0; i--)
@@ -2034,6 +2188,17 @@ class Program
             {
                 if (_isWaitingForNumpad)
                     TrayIcon.TryHandleHelpPopupMouse(msg, ms.pt.X, ms.pt.Y);
+
+                // スタック未管理ウィンドウのタイトルバードラッグ追跡（モーダル外）
+                if (_stackTabForms.Count > 0
+                    && !_isEdgeMode && !_isStackMode && !_isSwapMode
+                    && _windowSetPhase == WindowSetPhase.None
+                    && !_isWaitingForNumpad
+                    && _resizePhase == ResizePhase.None
+                    && !_isMoveMode)
+                {
+                    HandleStackDropMouseEvent(WM_MOUSEMOVE, ms.pt);
+                }
 
                 // --- 高速移動 (Resize Mode, Move Mode 外のみ) ---
                 if (_resizePhase == ResizePhase.None && !_isMoveMode && !_isEdgeMode)
@@ -2365,6 +2530,11 @@ class Program
                 short delta = (short)((ms.mouseData >> 16) & 0xFFFF);
                 if (delta != 0 && TryHandleStackTabWheel(ms.pt, delta))
                     return (IntPtr)1;
+            }
+            else if (_stackTabForms.Count > 0
+                     && (msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP))
+            {
+                HandleStackDropMouseEvent(msg, ms.pt);
             }
         }
 
