@@ -17,6 +17,27 @@ class Program
     [DllImport("user32.dll")]
     static extern IntPtr WindowFromPoint(POINT Point);
 
+[DllImport("user32.dll")]
+static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
+[StructLayout(LayoutKind.Sequential)]
+private struct GUITHREADINFO
+{
+    public int cbSize;
+    public uint flags;
+    public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+    public int rcLeft, rcTop, rcRight, rcBottom;
+}
+private const uint GUI_INMOVESIZE = 0x00000002;
+
+private static bool IsWindowInMoveSize(IntPtr hwnd)
+{
+    uint tid = GetWindowThreadProcessId(hwnd, out _);
+    if (tid == 0) return false;
+    var gti = new GUITHREADINFO { cbSize = Marshal.SizeOf<GUITHREADINFO>() };
+    return GetGUIThreadInfo(tid, ref gti) && (gti.flags & GUI_INMOVESIZE) != 0;
+}
+
     [DllImport("user32.dll")]
     static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -2047,8 +2068,13 @@ class Program
                 {
                     if (targetForm.IsDisposed) return;
                     var delay = new System.Windows.Forms.Timer { Interval = 40 };
+                    int waited = 0;
                     delay.Tick += (_, _) =>
                     {
+                        // ドロップ元の移動モーダルループが終了するまで待機（最大 ~1.5 秒）
+                        waited += delay.Interval;
+                        if (waited < 1500 && IsWindow(droppedHwnd) && IsWindowInMoveSize(droppedHwnd))
+                            return;
                         delay.Stop();
                         delay.Dispose();
                         if (!targetForm.IsDisposed && IsWindow(droppedHwnd) && !IsManagedByAnyStack(droppedHwnd))
