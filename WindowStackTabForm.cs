@@ -292,6 +292,8 @@ sealed class WindowStackTabForm : Form
     {
         if (IsDisposed || !IsHandleCreated || !Visible || _hiddenByDesktop)
             return false;
+        if (GetWindowRect(Handle, out RECT r))
+            return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
         return Bounds.Contains(x, y);
     }
 

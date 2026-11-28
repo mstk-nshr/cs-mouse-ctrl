@@ -1945,6 +1945,21 @@ class Program
         return null;
     }
 
+    private static bool HasWindowMovedForStackDrop(IntPtr hwnd, RECT startRect, bool startZoomed)
+    {
+        if (!GetWindowRect(hwnd, out RECT curRect))
+            return false;
+
+        // 辺・角リサイズ（対辺が固定）と区別しつつ、スナップ解除・最大化解除・異DPI間移動でも移動を検出
+        bool movedX = curRect.Left != startRect.Left && curRect.Right != startRect.Right;
+        bool movedY = curRect.Top != startRect.Top && curRect.Bottom != startRect.Bottom;
+        if (movedX || movedY)
+            return true;
+
+        bool movedAny = curRect.Left != startRect.Left || curRect.Top != startRect.Top;
+        return movedAny && startZoomed && !IsZoomed(hwnd);
+    }
+
     private static void HandleStackDropMouseEvent(int msg, POINT pt)
     {
         if (_stackTabForms.Count == 0)
@@ -1981,29 +1996,16 @@ class Program
         {
             if (_stackDropCandidateHwnd == IntPtr.Zero) return;
 
-            // 左ボタンが既に離れていたらリセット
-            if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
-            {
-                ResetStackDropState();
-                return;
-            }
-
             if (!IsWindow(_stackDropCandidateHwnd) || IsIconic(_stackDropCandidateHwnd))
             {
                 ResetStackDropState();
                 return;
             }
 
-            if (!_stackDropIsDragging && GetWindowRect(_stackDropCandidateHwnd, out RECT curRect))
+            if (!_stackDropIsDragging
+                && HasWindowMovedForStackDrop(_stackDropCandidateHwnd, _stackDropStartRect, _stackDropStartZoomed))
             {
-                bool moved = curRect.Left != _stackDropStartRect.Left || curRect.Top != _stackDropStartRect.Top;
-                bool sameSize = (curRect.Right - curRect.Left) == (_stackDropStartRect.Right - _stackDropStartRect.Left)
-                             && (curRect.Bottom - curRect.Top) == (_stackDropStartRect.Bottom - _stackDropStartRect.Top);
-
-                if (moved && (sameSize || (_stackDropStartZoomed && !IsZoomed(_stackDropCandidateHwnd))))
-                {
-                    _stackDropIsDragging = true;
-                }
+                _stackDropIsDragging = true;
             }
 
             if (_stackDropIsDragging)
@@ -2025,11 +2027,17 @@ class Program
         if (msg == WM_LBUTTONUP)
         {
             IntPtr droppedHwnd = _stackDropCandidateHwnd;
+            RECT startRect = _stackDropStartRect;
+            bool startZoomed = _stackDropStartZoomed;
             bool wasDragging = _stackDropIsDragging;
             ResetStackDropState();
 
-            if (!wasDragging || droppedHwnd == IntPtr.Zero) return;
+            if (droppedHwnd == IntPtr.Zero) return;
             if (!IsWindow(droppedHwnd) || IsIconic(droppedHwnd) || IsManagedByAnyStack(droppedHwnd)) return;
+
+            if (!wasDragging)
+                wasDragging = HasWindowMovedForStackDrop(droppedHwnd, startRect, startZoomed);
+            if (!wasDragging) return;
 
             var targetForm = FindStackTabFormAt(pt);
             if (targetForm != null && targetForm.IsHandleCreated)
