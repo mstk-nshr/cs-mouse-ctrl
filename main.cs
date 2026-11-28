@@ -1955,12 +1955,19 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
         ClearStackDropHighlight();
     }
 
+    private static bool StackFormContains(WindowStackTabForm form, POINT pt)
+    {
+        // フック座標と GetWindowRect の座標系（DPI 仮想化）が異なる場合に備え、GetCursorPos の座標でも判定する
+        if (form.ContainsScreenPoint(pt.X, pt.Y)) return true;
+        return GetCursorPos(out POINT cp) && form.ContainsScreenPoint(cp.X, cp.Y);
+    }
+
     private static WindowStackTabForm? FindStackTabFormAt(POINT pt)
     {
         for (int i = _stackTabForms.Count - 1; i >= 0; i--)
         {
             var form = _stackTabForms[i];
-            if (!form.IsDisposed && form.ContainsScreenPoint(pt.X, pt.Y))
+            if (!form.IsDisposed && StackFormContains(form, pt))
                 return form;
         }
         return null;
@@ -2092,7 +2099,7 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
         {
             var form = _stackTabForms[i];
             if (form.IsDisposed) continue;
-            if (form.ContainsScreenPoint(pt.X, pt.Y))
+            if (StackFormContains(form, pt))
             {
                 long now = Environment.TickCount64;
                 if (now - _stackWheelLastTick > 300 || (_stackWheelAccum != 0 && Math.Sign(_stackWheelAccum) != Math.Sign(delta)))
