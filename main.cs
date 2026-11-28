@@ -3269,6 +3269,17 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
         int winWidth  = cellW;
         int winHeight = cellH;
 
+        // スタック管理下のウィンドウはタブバー分の高さを上端に確保する
+        if (IsManagedByAnyStack(target))
+        {
+            int tabH = WindowStackTabForm.TabBarHeight;
+            if (winHeight - tabH >= 100)
+            {
+                winTop    += tabH;
+                winHeight -= tabH;
+            }
+        }
+
         // 最大化されている場合は復元してからスナップ
         if (IsZoomed(target))
             ShowWindow(target, SW_RESTORE);
