@@ -277,6 +277,17 @@ sealed class TrayIcon : IDisposable
     }
 
     /// <summary>
+    /// 表示中のポップアップをカーソル付近へ移動し、最前面へ持ち上げる。
+    /// </summary>
+    internal static void MoveHelpPopupNearCursor()
+    {
+        var popup = _helpPopup;
+        if (popup == null || popup.IsDisposed || !popup.Visible) return;
+        popup.UpdatePosition();
+        popup.BringToTopMost();
+    }
+
+    /// <summary>
     /// 指定したスクリーン座標が現在表示中のヘルプポップアップ内にあるかどうかを返す。
     /// </summary>
     internal static bool IsPointInHelpPopup(int screenX, int screenY)
@@ -1088,7 +1099,7 @@ sealed class TrayIcon : IDisposable
             }
         }
 
-        private void UpdatePosition()
+        public void UpdatePosition()
         {
             Point cursorPt = Cursor.Position;
             Rectangle wa = Screen.FromPoint(cursorPt).WorkingArea;

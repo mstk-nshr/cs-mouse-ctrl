@@ -1804,6 +1804,9 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
             ov.BringToTopMost();
             _stackOverlays.Add(ov);
         }
+
+        // 案内ポップアップを塗りつぶしオーバーレイより上・カーソル付近に表示
+        TrayIcon.MoveHelpPopupNearCursor();
     }
 
     private static void HandleStackClick(POINT pt)
@@ -2214,6 +2217,10 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
             {
                 if (_isWaitingForNumpad)
                     TrayIcon.TryHandleHelpPopupMouse(msg, ms.pt.X, ms.pt.Y);
+
+                // スタック選択中は案内ポップアップをマウスポインタに追従させる
+                if (_isStackMode)
+                    TrayIcon.MoveHelpPopupNearCursor();
 
                 // スタック未管理ウィンドウのタイトルバードラッグ追跡（モーダル外）
                 if (_stackTabForms.Count > 0
