@@ -203,6 +203,8 @@ sealed class WindowStackTabForm : Form
     private int _hoverTabIndex = -1;
     private bool _hoverClose;
     private bool _isDropTarget;
+    private IntPtr _dragTabHwnd = IntPtr.Zero;
+    private bool _dragTabOutside;
     private readonly int _initLeft;
     private readonly int _initTop;
     private readonly int _initWidth;
@@ -272,9 +274,11 @@ sealed class WindowStackTabForm : Form
         _syncTimer.Tick += SyncTimer_Tick;
         _syncTimer.Start();
 
-        MouseMove  += OnMouseMove;
-        MouseLeave += OnMouseLeave;
-        MouseDown  += OnMouseDown;
+        MouseMove           += OnMouseMove;
+        MouseLeave          += OnMouseLeave;
+        MouseDown           += OnMouseDown;
+        MouseUp             += OnMouseUp;
+        MouseCaptureChanged += OnMouseCaptureChanged;
     }
 
     // -----------------------------------------------------------------------
@@ -632,9 +636,18 @@ sealed class WindowStackTabForm : Form
             Rectangle r = GetTabRect(i);
             bool isActive  = _windows[i] == _activeWindow;
             bool isHovered = i == _hoverTabIndex;
+            bool isDetaching = _dragTabOutside && _windows[i] == _dragTabHwnd;
 
-            Brush bg = isActive ? activeBrush : isHovered ? hoverBrush : normalBrush;
-            FillButton(g, bg, r, radius);
+            if (isDetaching)
+            {
+                using var detachBrush = new SolidBrush(Color.FromArgb(140, 196, 43, 28));
+                FillButton(g, detachBrush, r, radius);
+            }
+            else
+            {
+                Brush bg = isActive ? activeBrush : isHovered ? hoverBrush : normalBrush;
+                FillButton(g, bg, r, radius);
+            }
 
             if (!hasButtonGap && i > 0)
                 g.DrawLine(sepPen, r.Left, 2, r.Left, r.Bottom - 2);
@@ -738,6 +751,23 @@ sealed class WindowStackTabForm : Form
 
     private void OnMouseMove(object? sender, MouseEventArgs e)
     {
+        if (_dragTabHwnd != IntPtr.Zero)
+        {
+            if ((e.Button & MouseButtons.Left) == 0)
+            {
+                ResetTabDrag();
+                return;
+            }
+            bool outside = !ClientRectangle.Contains(e.Location);
+            if (outside != _dragTabOutside)
+            {
+                _dragTabOutside = outside;
+                Cursor = outside ? Cursors.SizeAll : Cursors.Default;
+                Redraw();
+            }
+            return;
+        }
+
         int hit = HitTestTab(e.Location);
         int newTab = hit >= 0 ? hit : -1;
         bool newClose = hit == -2;
@@ -751,6 +781,8 @@ sealed class WindowStackTabForm : Form
 
     private void OnMouseLeave(object? sender, EventArgs e)
     {
+        if (_dragTabHwnd != IntPtr.Zero) return;
+
         if (_hoverTabIndex != -1 || _hoverClose)
         {
             _hoverTabIndex = -1;
@@ -771,8 +803,48 @@ sealed class WindowStackTabForm : Form
         }
         if (hit >= 0 && hit < _windows.Count)
         {
-            ActivateWindow(_windows[hit]);
+            IntPtr hwnd = _windows[hit];
+            _dragTabHwnd = hwnd;
+            _dragTabOutside = false;
+            Capture = true;
+            ActivateWindow(hwnd);
         }
+    }
+
+    private void OnMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left || _dragTabHwnd == IntPtr.Zero) return;
+
+        IntPtr hwnd = _dragTabHwnd;
+        bool droppedOutside = !ClientRectangle.Contains(e.Location);
+        ResetTabDrag();
+
+        if (droppedOutside && hwnd != IntPtr.Zero)
+        {
+            int idx = _windows.IndexOf(hwnd);
+            string title = (idx >= 0 && idx < _titles.Count && !string.IsNullOrWhiteSpace(_titles[idx]))
+                ? _titles[idx]
+                : GetWindowTitle(hwnd);
+
+            RemoveWindows(new[] { hwnd });
+            TrayIcon.ShowMessage($"Stack から除外しました:\n{title}", durationMs: 3000, clickThrough: true);
+        }
+    }
+
+    private void OnMouseCaptureChanged(object? sender, EventArgs e)
+    {
+        if (!Capture && _dragTabHwnd != IntPtr.Zero)
+            ResetTabDrag();
+    }
+
+    private void ResetTabDrag()
+    {
+        bool needRedraw = _dragTabOutside;
+        _dragTabHwnd = IntPtr.Zero;
+        _dragTabOutside = false;
+        Cursor = Cursors.Default;
+        if (Capture) Capture = false;
+        if (needRedraw) Redraw();
     }
 
     private void ActivateWindow(IntPtr hwnd)
