@@ -1916,9 +1916,6 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
         _stackTabForms.Clear();
     }
 
-    private static int _stackWheelAccum;
-    private static long _stackWheelLastTick;
-
     // タイトルバードラッグによる既存スタックへの追加（ドロップ）追跡
     private static IntPtr _stackDropCandidateHwnd = IntPtr.Zero;
     private static RECT _stackDropStartRect;
@@ -2101,20 +2098,8 @@ private static bool IsWindowInMoveSize(IntPtr hwnd)
             if (form.IsDisposed) continue;
             if (StackFormContains(form, pt))
             {
-                long now = Environment.TickCount64;
-                if (now - _stackWheelLastTick > 300 || (_stackWheelAccum != 0 && Math.Sign(_stackWheelAccum) != Math.Sign(delta)))
-                    _stackWheelAccum = 0;
-                _stackWheelLastTick = now;
-                _stackWheelAccum += delta;
-
-                const int WheelDelta = 120;
-                if (Math.Abs(_stackWheelAccum) >= WheelDelta)
-                {
-                    int step = _stackWheelAccum > 0 ? -1 : 1;
-                    _stackWheelAccum = 0;
-                    if (form.IsHandleCreated)
-                        form.BeginInvoke(() => form.SwitchTabByDelta(step));
-                }
+                if (form.IsHandleCreated)
+                    form.BeginInvoke(() => form.HandleWheelDelta(delta));
                 return true;
             }
         }

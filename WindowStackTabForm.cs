@@ -313,6 +313,46 @@ sealed class WindowStackTabForm : Form
         ActivateWindow(_windows[nextIdx]);
     }
 
+    private int  _wheelAccum;
+    private long _wheelLastTick;
+
+    /// <summary>
+    /// ホイール回転量を蓄積し、1 ノッチ (120) ごとにタブを切り替える。
+    /// 上回転(+) で前のタブ、下回転(-) で次のタブ。
+    /// </summary>
+    public void HandleWheelDelta(int delta)
+    {
+        if (IsDisposed || delta == 0) return;
+
+        long now = Environment.TickCount64;
+        if (now - _wheelLastTick > 300 || (_wheelAccum != 0 && Math.Sign(_wheelAccum) != Math.Sign(delta)))
+            _wheelAccum = 0;
+        _wheelLastTick = now;
+        _wheelAccum += delta;
+
+        const int WheelDelta = 120;
+        if (Math.Abs(_wheelAccum) >= WheelDelta)
+        {
+            int step = _wheelAccum > 0 ? -1 : 1;
+            _wheelAccum = 0;
+            SwitchTabByDelta(step);
+        }
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WM_MOUSEWHEEL = 0x020A;
+        // 低レベルフックで捕捉できなかったホイール（高精度タッチパッド等）をタブバー自身で処理する
+        if (m.Msg == WM_MOUSEWHEEL)
+        {
+            int delta = (short)((m.WParam.ToInt64() >> 16) & 0xFFFF);
+            HandleWheelDelta(delta);
+            m.Result = IntPtr.Zero;
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
     /// <summary>ドラッグ中のウィンドウをドロップ対象としてハイライト表示するか設定する。</summary>
     public void SetDropTargetHighlight(bool highlight)
     {
